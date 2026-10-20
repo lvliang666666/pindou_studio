@@ -223,15 +223,17 @@ class _PatternCanvasState extends State<PatternCanvas> {
           );
         }
         // 脏格子覆盖了旧位图的网格线，在其上补画。
-        // 关键：网格线居中于格线（线宽一半在格子内、一半在邻居内），
-        // 补画必须以格线为中心画完整线宽，与全量绘制（drawPath 居中
-        // 描边）完全一致。线段范围只画脏格子附近（±1 格）即可——
-        // 旧位图上其余部分的线本来就完好，无需重画。
+        // 关键 1：补画必须以格线为中心画完整线宽，与全量绘制一致。
+        // 关键 2：线段范围必须精确等于"色块实际覆盖的区域"
+        // （脏格子矩形 ± bleed），绝不能伸入完好区域——半透明线
+        // 在旧位图完好的线上再画一遍会叠加变黑（此前 ±1 格的
+        // 补画范围导致"画一行影响周围行"）。
+        // 端点衔接：相邻脏格子的覆盖段天然连续（共享格线坐标相同），
+        // 无需外扩。
         if (widget.showGrid) {
           final cell = _baseCell;
-          // 每条格线需要补画的范围（脏格子覆盖段 ±1 格，保证线段
-          // 端点落在完好区域，衔接处无缺口）。键为格线坐标
-          // （竖线 gx 0..width，横线 gy 0..height）。
+          // 每条格线需要补画的范围（键为格线坐标：竖线 gx 0..width，
+          // 横线 gy 0..height；值为该格线上被色块覆盖的区段）。
           final vSegs = <int, (double, double)>{};
           final hSegs = <int, (double, double)>{};
           for (final (x, y, _) in dirty) {
@@ -251,10 +253,11 @@ class _PatternCanvasState extends State<PatternCanvas> {
                   : (old.$1 < x0 ? old.$1 : x0, old.$2 > x1 ? old.$2 : x1);
             }
 
-            mergeV(x, t - cell, b + cell);
-            mergeV(x + 1, t - cell, b + cell);
-            mergeH(y, l - cell, r + cell);
-            mergeH(y + 1, l - cell, r + cell);
+            // 覆盖段 = 格线与色块（含 bleed）的交集。
+            mergeV(x, t - bleed, b + bleed);
+            mergeV(x + 1, t - bleed, b + bleed);
+            mergeH(y, l - bleed, r + bleed);
+            mergeH(y + 1, l - bleed, r + bleed);
           }
           // 细线：所有格线（与全量 gridPath 一致）。
           // 加深线：格线坐标 %10==0（与全量 majorPath 一致）。
@@ -280,7 +283,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
           }
         }
         // 29 格底板分界虚线：脏格子覆盖段同样需要补画（橙色虚线
-        // 1.5px 居中于格线，bleed 1.2 盖掉自己侧 0.75px 后必须补回）。
+        // 1.5px 居中于格线，色块 bleed 盖掉自己侧 0.75px 后必须补回；
+        // 覆盖段同样精确限制在色块区域内，不伸入完好区域）。
         if (widget.showRuler) {
           const boardSize = 29;
           final dashPaint = Paint()
@@ -291,27 +295,28 @@ class _PatternCanvasState extends State<PatternCanvas> {
           for (final (x, y, _) in dirty) {
             final l = x * cell, t = y * cell;
             final r = l + cell, b = t + cell;
-            // 竖向虚线：格线 x+1 == 29 的倍数（该格左邻虚线）。
-            if ((x + 1) % boardSize == 0 && x + 1 < p.width) {
-              final gx = (x + 1) * cell;
-              drawDashedLine(canvas, dashPaint,
-                  Offset(gx, t - cell), Offset(gx, b + cell));
-            }
+            // 竖向虚线：格线 x 与 x+1 是 29 的倍数（0 与最外边界除外，
+            // 与全量绘制一致）。
             if (x % boardSize == 0 && x > 0) {
               final gx = x * cell;
               drawDashedLine(canvas, dashPaint,
-                  Offset(gx, t - cell), Offset(gx, b + cell));
+                  Offset(gx, t - bleed), Offset(gx, b + bleed));
+            }
+            if ((x + 1) % boardSize == 0 && x + 1 < p.width) {
+              final gx = (x + 1) * cell;
+              drawDashedLine(canvas, dashPaint,
+                  Offset(gx, t - bleed), Offset(gx, b + bleed));
             }
             // 横向虚线。
-            if ((y + 1) % boardSize == 0 && y + 1 < p.height) {
-              final gy = (y + 1) * cell;
-              drawDashedLine(canvas, dashPaint,
-                  Offset(l - cell, gy), Offset(r + cell, gy));
-            }
             if (y % boardSize == 0 && y > 0) {
               final gy = y * cell;
               drawDashedLine(canvas, dashPaint,
-                  Offset(l - cell, gy), Offset(r + cell, gy));
+                  Offset(l - bleed, gy), Offset(r + bleed, gy));
+            }
+            if ((y + 1) % boardSize == 0 && y + 1 < p.height) {
+              final gy = (y + 1) * cell;
+              drawDashedLine(canvas, dashPaint,
+                  Offset(l - bleed, gy), Offset(r + bleed, gy));
             }
           }
         }
