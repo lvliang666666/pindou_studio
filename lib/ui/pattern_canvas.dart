@@ -204,11 +204,12 @@ class _PatternCanvasState extends State<PatternCanvas> {
           Paint()..filterQuality = FilterQuality.none,
         );
         final fill = Paint()..style = PaintingStyle.fill;
-        // 色块向外扩半个线宽：网格线（半透明黑）居中于格子边界，
-        // 一半落在邻居格子内——不扩边的话，新线会叠加在旧位图的
-        // 旧线上导致边界变深（擦除后尤其明显）。扩出去的半像素
-        // 随后被新画的线覆盖，视觉无损失。
-        const bleed = 0.5;
+        // 色块向外扩 1.2px：所有网格线居中于格线（细线 1px 两侧各 0.5px、
+        // 加深线 2px 两侧各 1px、29 格虚线 1.5px 两侧各 0.75px）。
+        // bleed 必须盖住最宽线在自己一侧的半宽（1px），否则旧线残留，
+        // 新线叠加其上——擦除后表现为"比周围的线更黑"（半透明线叠加两次）。
+        // 扩出去的部分随后被补画的线覆盖，视觉无损失。
+        const bleed = 1.2;
         for (final (x, y, bead) in dirty) {
           fill.color = Color(bead.argb);
           canvas.drawRect(
@@ -223,25 +224,40 @@ class _PatternCanvasState extends State<PatternCanvas> {
         }
         // 脏格子覆盖了旧位图的网格线，在其上补画。
         // 关键：网格线居中于格线（线宽一半在格子内、一半在邻居内），
-        // 脏格子色块（含 bleed 0.5px）只盖掉自己一侧的半条线，
-        // 邻居一侧的半条线仍在旧位图上。若只补"格子边缘"这半条，
-        // 叠加后线宽只有一半且位置偏移——10 格加深线表现为"断线/变浅"。
-        // 因此补画必须以格线为中心画完整线宽（向两侧各扩半线宽），
-        // 与全量绘制（drawPath 居中描边）完全一致。
+        // 补画必须以格线为中心画完整线宽，与全量绘制（drawPath 居中
+        // 描边）完全一致。线段范围只画脏格子附近（±1 格）即可——
+        // 旧位图上其余部分的线本来就完好，无需重画。
         if (widget.showGrid) {
           final cell = _baseCell;
-          // 收集脏格子涉及的格线（以格线坐标标识，非格子边缘）：
-          // 竖线 gx（0..width），横线 gy（0..height），去重。
-          final vLines = <int>{};
-          final hLines = <int>{};
+          // 每条格线需要补画的范围（脏格子覆盖段 ±1 格，保证线段
+          // 端点落在完好区域，衔接处无缺口）。键为格线坐标
+          // （竖线 gx 0..width，横线 gy 0..height）。
+          final vSegs = <int, (double, double)>{};
+          final hSegs = <int, (double, double)>{};
           for (final (x, y, _) in dirty) {
-            vLines.add(x); // 左格线
-            vLines.add(x + 1); // 右格线
-            hLines.add(y); // 上格线
-            hLines.add(y + 1); // 下格线
+            final l = x * cell, t = y * cell;
+            final r = l + cell, b = t + cell;
+            void mergeV(int gx, double y0, double y1) {
+              final old = vSegs[gx];
+              vSegs[gx] = old == null
+                  ? (y0, y1)
+                  : (old.$1 < y0 ? old.$1 : y0, old.$2 > y1 ? old.$2 : y1);
+            }
+
+            void mergeH(int gy, double x0, double x1) {
+              final old = hSegs[gy];
+              hSegs[gy] = old == null
+                  ? (x0, x1)
+                  : (old.$1 < x0 ? old.$1 : x0, old.$2 > x1 ? old.$2 : x1);
+            }
+
+            mergeV(x, t - cell, b + cell);
+            mergeV(x + 1, t - cell, b + cell);
+            mergeH(y, l - cell, r + cell);
+            mergeH(y + 1, l - cell, r + cell);
           }
-          // 细线：所有格线（与全量 gridPath 一致：0..width/height 全画）。
-          // 加深线：x%10==0 的竖线、y%10==0 的横线（与全量 majorPath 一致）。
+          // 细线：所有格线（与全量 gridPath 一致）。
+          // 加深线：格线坐标 %10==0（与全量 majorPath 一致）。
           final thin = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1
@@ -250,17 +266,53 @@ class _PatternCanvasState extends State<PatternCanvas> {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2
             ..color = Colors.black45;
-          for (final gx in vLines) {
-            final isMajor = gx % 10 == 0;
-            final x = gx * cell;
-            canvas.drawLine(
-                Offset(x, 0), Offset(x, p.height * cell), isMajor ? thick : thin);
+          for (final entry in vSegs.entries) {
+            final isMajor = entry.key % 10 == 0;
+            final x = entry.key * cell;
+            canvas.drawLine(Offset(x, entry.value.$1),
+                Offset(x, entry.value.$2), isMajor ? thick : thin);
           }
-          for (final gy in hLines) {
-            final isMajor = gy % 10 == 0;
-            final y = gy * cell;
-            canvas.drawLine(
-                Offset(0, y), Offset(p.width * cell, y), isMajor ? thick : thin);
+          for (final entry in hSegs.entries) {
+            final isMajor = entry.key % 10 == 0;
+            final y = entry.key * cell;
+            canvas.drawLine(Offset(entry.value.$1, y),
+                Offset(entry.value.$2, y), isMajor ? thick : thin);
+          }
+        }
+        // 29 格底板分界虚线：脏格子覆盖段同样需要补画（橙色虚线
+        // 1.5px 居中于格线，bleed 1.2 盖掉自己侧 0.75px 后必须补回）。
+        if (widget.showRuler) {
+          const boardSize = 29;
+          final dashPaint = Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..color = Colors.deepOrange.withValues(alpha: 0.65);
+          final cell = _baseCell;
+          for (final (x, y, _) in dirty) {
+            final l = x * cell, t = y * cell;
+            final r = l + cell, b = t + cell;
+            // 竖向虚线：格线 x+1 == 29 的倍数（该格左邻虚线）。
+            if ((x + 1) % boardSize == 0 && x + 1 < p.width) {
+              final gx = (x + 1) * cell;
+              drawDashedLine(canvas, dashPaint,
+                  Offset(gx, t - cell), Offset(gx, b + cell));
+            }
+            if (x % boardSize == 0 && x > 0) {
+              final gx = x * cell;
+              drawDashedLine(canvas, dashPaint,
+                  Offset(gx, t - cell), Offset(gx, b + cell));
+            }
+            // 横向虚线。
+            if ((y + 1) % boardSize == 0 && y + 1 < p.height) {
+              final gy = (y + 1) * cell;
+              drawDashedLine(canvas, dashPaint,
+                  Offset(l - cell, gy), Offset(r + cell, gy));
+            }
+            if (y % boardSize == 0 && y > 0) {
+              final gy = y * cell;
+              drawDashedLine(canvas, dashPaint,
+                  Offset(l - cell, gy), Offset(r + cell, gy));
+            }
           }
         }
       } else {
@@ -820,39 +872,17 @@ class _PatternPainter extends CustomPainter {
         ..strokeWidth = 1.5
         ..color = Colors.deepOrange.withValues(alpha: 0.65);
       for (int x = boardSize; x < pattern.width; x += boardSize) {
-        _drawDashedLine(
+        drawDashedLine(
           canvas, dashPaint,
           Offset(x * cell, 0), Offset(x * cell, pattern.height * cell),
         );
       }
       for (int y = boardSize; y < pattern.height; y += boardSize) {
-        _drawDashedLine(
+        drawDashedLine(
           canvas, dashPaint,
           Offset(0, y * cell), Offset(pattern.width * cell, y * cell),
         );
       }
-    }
-  }
-
-  /// 绘制竖直/水平虚线。
-  static void _drawDashedLine(Canvas canvas, Paint paint, Offset start, Offset end) {
-    const dashLen = 6.0;
-    const gapLen = 4.0;
-    final dx = end.dx - start.dx;
-    final dy = end.dy - start.dy;
-    final len = (dx * dx + dy * dy);
-    if (len == 0) return;
-    final unit = Offset(dx, dy) / len;
-    var dist = 0.0;
-    final total = len;
-    while (dist < total) {
-      final segEnd = (dist + dashLen).clamp(0.0, total);
-      canvas.drawLine(
-        start + unit * dist,
-        start + unit * segEnd,
-        paint,
-      );
-      dist = segEnd + gapLen;
     }
   }
 
@@ -862,5 +892,27 @@ class _PatternPainter extends CustomPainter {
         oldDelegate.showGrid != showGrid ||
         oldDelegate.showRuler != showRuler ||
         oldDelegate.cell != cell;
+  }
+}
+
+/// 绘制竖直/水平虚线（文件级函数：全量绘制与增量补画共用）。
+void drawDashedLine(Canvas canvas, Paint paint, Offset start, Offset end) {
+  const dashLen = 6.0;
+  const gapLen = 4.0;
+  final dx = end.dx - start.dx;
+  final dy = end.dy - start.dy;
+  final len = (dx * dx + dy * dy);
+  if (len == 0) return;
+  final unit = Offset(dx, dy) / len;
+  var dist = 0.0;
+  final total = len;
+  while (dist < total) {
+    final segEnd = (dist + dashLen).clamp(0.0, total);
+    canvas.drawLine(
+      start + unit * dist,
+      start + unit * segEnd,
+      paint,
+    );
+    dist = segEnd + gapLen;
   }
 }
