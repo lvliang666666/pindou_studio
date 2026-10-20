@@ -4,16 +4,16 @@
 
 ## 架构
 
-两层结构：**项目库（首页）→ 编辑器（功能页）**
+单页直入：**打开即编辑器**，无首页流程。
 
-- **项目库 LibraryPage**：卡片网格展示已保存项目（缩略图 + 名称 + 尺寸 + 颜色数 + 时间），
-  支持新建（导入图片）、打开、重命名、删除；响应式列数（窄屏 2 列 → 宽屏 5 列）
 - **编辑器 EditorPage**：参数调节 + 图纸画布 + 统计导出，响应式布局：
   - 宽屏（≥1100px）：三栏（参数 | 画布 | 统计）
   - 中屏（≥700px）：两栏（画布 + 参数/统计切换侧面板）
   - 窄屏（手机）：画布全屏 + 底部工具条弹出面板
+- **项目操作**：AppBar 右上角文件夹菜单（新建 / 打开项目…），
+  保存按钮 + Ctrl+S；打开项目弹列表选择（名称/尺寸/色数/日期）
 - **项目持久化**：每个项目一个 JSON（色号 RLE 压缩）+ 缩略图 PNG，
-  存于系统文档目录 `PindouStudio/`；未保存修改返回时确认，Ctrl+S 保存
+  存于系统文档目录 `PindouStudio/`；未保存修改时新建/打开先确认
 
 ## 功能
 
@@ -45,11 +45,10 @@ lib/
   data/            项目模型（SavedProject，RLE 序列化）+ 文件仓库（ProjectRepository）
   state/           EditorState（编辑器状态：转换/编辑/撤销/保存加载）
   ui/
-    library/       项目库首页
-    editor/        编辑器页（响应式三栏/两栏/窄屏）
+    editor/        编辑器页（响应式三栏/两栏/窄屏 + 项目菜单/打开对话框）
     pattern_canvas.dart  图纸画布（预光栅化位图渲染）
     export_service.dart  PNG/CSV 导出
-  main.dart        入口 + Navigator 导航流
+  main.dart        入口（应用根直接挂编辑器）
 ```
 
 ## 开发
@@ -123,13 +122,28 @@ canvas.drawImageRect(image, srcRect, dstRect, Paint()..filterQuality = FilterQua
 ## 已知环境问题
 
 项目路径包含非 ASCII 字符（如中文）时，Windows release 构建会因
-gen_snapshot 无法读取中文路径而失败。临时解决：
+gen_snapshot 无法读取中文路径而失败。临时解决（拷贝到 ASCII 路径构建）：
 
 ```bash
-subst P: D:\LvProject\拼豆
+# 1. 准备 ASCII 中转目录并映射盘符
+mkdir D:\LvProject\pinDouAscii
+subst P: D:\LvProject\pinDouAscii
+
+# 2. 把项目拷到 P 盘（首次或代码更新后同步）
+xcopy /E /I /H D:\LvProject\拼豆\pindou_studio P:\pindou_studio
+
+# 3. 删除拷贝来的 build 缓存（CMakeCache 记录原路径，跨盘会报错）
+rmdir /s /q P:\pindou_studio\build
+
+# 4. 构建
 cd /d P:\pindou_studio
 flutter build windows --release
+
+# 5. 产物拷回项目目录后卸载盘符
 subst P: /D
 ```
+
+注意：直接对中文路径项目 `subst` 映射后构建仍会失败（CMake 缓存与
+flutter 插件符号链接记录的是原中文路径），必须**物理拷贝**到 ASCII 路径。
 
 构建产物位于 build/windows/x64/runner/Release/pindou_studio.exe。
