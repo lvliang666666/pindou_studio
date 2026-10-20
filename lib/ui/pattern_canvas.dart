@@ -222,30 +222,26 @@ class _PatternCanvasState extends State<PatternCanvas> {
           );
         }
         // 脏格子覆盖了旧位图的网格线，在其上补画。
-        // 与全量绘制保持一致：细线段去重后统一画（相邻脏格子共享边
-        // 只画一次，避免叠加变深）；加深线只画 x%10==0 的左竖边、
-        // y%10==0 的上横边（与全量 majorPath 的 0,10,20... 一致）。
+        // 关键：网格线居中于格线（线宽一半在格子内、一半在邻居内），
+        // 脏格子色块（含 bleed 0.5px）只盖掉自己一侧的半条线，
+        // 邻居一侧的半条线仍在旧位图上。若只补"格子边缘"这半条，
+        // 叠加后线宽只有一半且位置偏移——10 格加深线表现为"断线/变浅"。
+        // 因此补画必须以格线为中心画完整线宽（向两侧各扩半线宽），
+        // 与全量绘制（drawPath 居中描边）完全一致。
         if (widget.showGrid) {
           final cell = _baseCell;
-          // 收集边线段并去重：(x1, y1, x2, y2)。
-          final edges = <(double, double, double, double)>{};
-          final majorEdges = <(double, double, double, double)>{};
+          // 收集脏格子涉及的格线（以格线坐标标识，非格子边缘）：
+          // 竖线 gx（0..width），横线 gy（0..height），去重。
+          final vLines = <int>{};
+          final hLines = <int>{};
           for (final (x, y, _) in dirty) {
-            final l = x * cell, t = y * cell;
-            final r = l + cell, b = t + cell;
-            if (edges.add((l, t, l, b)) && x % 10 == 0) {
-              majorEdges.add((l, t, l, b)); // 左边是 10 格竖线
-            }
-            if (edges.add((r, t, r, b)) && (x + 1) % 10 == 0 && x + 1 == p.width) {
-              majorEdges.add((r, t, r, b)); // 图纸右边界
-            }
-            if (edges.add((l, t, r, t)) && y % 10 == 0) {
-              majorEdges.add((l, t, r, t)); // 上边是 10 格横线
-            }
-            if (edges.add((l, b, r, b)) && (y + 1) % 10 == 0 && y + 1 == p.height) {
-              majorEdges.add((l, b, r, b)); // 图纸下边界
-            }
+            vLines.add(x); // 左格线
+            vLines.add(x + 1); // 右格线
+            hLines.add(y); // 上格线
+            hLines.add(y + 1); // 下格线
           }
+          // 细线：所有格线（与全量 gridPath 一致：0..width/height 全画）。
+          // 加深线：x%10==0 的竖线、y%10==0 的横线（与全量 majorPath 一致）。
           final thin = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1
@@ -254,11 +250,17 @@ class _PatternCanvasState extends State<PatternCanvas> {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2
             ..color = Colors.black45;
-          for (final (x1, y1, x2, y2) in edges) {
-            canvas.drawLine(Offset(x1, y1), Offset(x2, y2), thin);
+          for (final gx in vLines) {
+            final isMajor = gx % 10 == 0;
+            final x = gx * cell;
+            canvas.drawLine(
+                Offset(x, 0), Offset(x, p.height * cell), isMajor ? thick : thin);
           }
-          for (final (x1, y1, x2, y2) in majorEdges) {
-            canvas.drawLine(Offset(x1, y1), Offset(x2, y2), thick);
+          for (final gy in hLines) {
+            final isMajor = gy % 10 == 0;
+            final y = gy * cell;
+            canvas.drawLine(
+                Offset(0, y), Offset(p.width * cell, y), isMajor ? thick : thin);
           }
         }
       } else {
