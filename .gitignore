@@ -47,3 +47,6 @@ app.*.map.json
 # 个人资产（不入公开仓库，见 版本管理规范/README.md「个人资产规则」）
 版本管理规范/
 releases/
+
+# 本地 release 构建产物副本（subst 构建方案的中转，不入库）
+build_release_latest/

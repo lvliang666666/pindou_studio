@@ -4,6 +4,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/project_model.dart';
+import '../../data/project_repository.dart';
 import '../../state/editor_state.dart';
 import '../export_service.dart';
 import '../pattern_canvas.dart';
@@ -130,38 +132,58 @@ class _EditorPageState extends State<EditorPage> {
     final state = widget.state;
     final pattern = state.pattern;
 
-    return PopScope(
-      canPop: !state.hasUnsavedChanges,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        final navigator = Navigator.of(context);
-        final leave = await _confirmDiscard();
-        if (leave == true && mounted) navigator.pop();
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: _buildTitle(context, state),
-          actions: [
-            IconButton(
-              tooltip: '撤销 (Ctrl+Z)',
-              icon: const Icon(Icons.undo),
-              onPressed: state.canUndo ? state.undo : null,
-            ),
-            IconButton(
-              tooltip: '重做 (Ctrl+Y)',
-              icon: const Icon(Icons.redo),
-              onPressed: state.canRedo ? state.redo : null,
-            ),
-            IconButton(
-              tooltip: '保存项目 (Ctrl+S)',
-              icon: state.hasUnsavedChanges
-                  ? const Icon(Icons.save_outlined)
-                  : const Icon(Icons.check_circle_outline),
-              onPressed: state.pattern == null ? null : _saveProject,
-            ),
-            const SizedBox(width: 4),
-          ],
-        ),
+    return Scaffold(
+      appBar: AppBar(
+        title: _buildTitle(context, state),
+        actions: [
+          IconButton(
+            tooltip: '撤销 (Ctrl+Z)',
+            icon: const Icon(Icons.undo),
+            onPressed: state.canUndo ? state.undo : null,
+          ),
+          IconButton(
+            tooltip: '重做 (Ctrl+Y)',
+            icon: const Icon(Icons.redo),
+            onPressed: state.canRedo ? state.redo : null,
+          ),
+          IconButton(
+            tooltip: '保存项目 (Ctrl+S)',
+            icon: state.hasUnsavedChanges
+                ? const Icon(Icons.save_outlined)
+                : const Icon(Icons.check_circle_outline),
+            onPressed: state.pattern == null ? null : _saveProject,
+          ),
+          PopupMenuButton<String>(
+            tooltip: '项目',
+            icon: const Icon(Icons.folder_open),
+            onSelected: (v) {
+              if (v == 'new') _newProject();
+              if (v == 'open') _openProjectDialog();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'new',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.add, size: 20),
+                  title: Text('新建项目'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'open',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.folder_open, size: 20),
+                  title: Text('打开项目…'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
         body: CallbackShortcuts(
           bindings: {
             const SingleActivator(LogicalKeyboardKey.keyZ, control: true):
@@ -189,7 +211,6 @@ class _EditorPageState extends State<EditorPage> {
             ),
           ),
         ),
-      ),
     );
   }
 
@@ -239,13 +260,45 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
-  /// 返回前确认：放弃修改 / 取消。
-  Future<bool?> _confirmDiscard() {
+  /// 新建项目：有未保存修改时先确认，然后重置编辑器。
+  Future<void> _newProject() async {
+    final state = widget.state;
+    if (state.hasUnsavedChanges) {
+      final proceed = await _confirmDiscard('新建将放弃当前未保存的修改，是否继续？');
+      if (proceed != true || !mounted) return;
+    }
+    state.reset();
+  }
+
+  /// 打开项目：弹出已保存项目选择列表。
+  Future<void> _openProjectDialog() async {
+    final state = widget.state;
+    if (state.hasUnsavedChanges) {
+      final proceed = await _confirmDiscard('打开其他项目将放弃当前未保存的修改，是否继续？');
+      if (proceed != true || !mounted) return;
+    }
+    final project = await showDialog<SavedProject>(
+      context: context,
+      builder: (context) => _OpenProjectDialog(repository: state.repository),
+    );
+    if (project == null || !mounted) return;
+    try {
+      await state.loadProject(project);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('打开项目失败：$e')),
+      );
+    }
+  }
+
+  /// 放弃修改确认：返回 true 表示用户确认放弃。
+  Future<bool?> _confirmDiscard(String message) {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('有未保存的修改'),
-        content: const Text('返回项目库将丢失未保存的修改，是否继续？'),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -254,13 +307,6 @@ class _EditorPageState extends State<EditorPage> {
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('放弃修改'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop(false);
-              _saveProject();
-            },
-            child: const Text('保存并返回'),
           ),
         ],
       ),
@@ -1063,3 +1109,136 @@ class _ColorPickerDialog extends StatelessWidget {
 
 /// 侧面板内容类型。
 enum _SidePanel { params, stats }
+
+/// 打开项目对话框：列出已保存项目，选中后返回完整数据。
+class _OpenProjectDialog extends StatefulWidget {
+  const _OpenProjectDialog({required this.repository});
+
+  final ProjectRepository repository;
+
+  @override
+  State<_OpenProjectDialog> createState() => _OpenProjectDialogState();
+}
+
+class _OpenProjectDialogState extends State<_OpenProjectDialog> {
+  List<ProjectSummary>? _projects;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final projects = await widget.repository.listProjects();
+      if (!mounted) return;
+      setState(() => _projects = projects);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    }
+  }
+
+  Future<void> _open(ProjectSummary summary) async {
+    try {
+      final project = await widget.repository.loadProject(summary.id);
+      if (!mounted) return;
+      if (project == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('项目不存在或已损坏')),
+        );
+        _load();
+        return;
+      }
+      Navigator.of(context).pop(project);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('打开失败：$e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('打开项目'),
+      content: SizedBox(
+        width: 420,
+        height: 380,
+        child: _buildBody(theme),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBody(ThemeData theme) {
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 40, color: Colors.redAccent),
+            const SizedBox(height: 10),
+            Text('读取项目列表失败：$_error'),
+            const SizedBox(height: 10),
+            FilledButton.tonal(onPressed: _load, child: const Text('重试')),
+          ],
+        ),
+      );
+    }
+    final projects = _projects;
+    if (projects == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (projects.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.folder_off_outlined,
+                size: 48,
+                color: theme.colorScheme.outline.withValues(alpha: 0.5)),
+            const SizedBox(height: 12),
+            const Text('还没有已保存的项目'),
+            const SizedBox(height: 4),
+            Text('编辑器里按 Ctrl+S 即可保存当前图纸',
+                style: theme.textTheme.bodySmall),
+          ],
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: projects.length,
+      itemBuilder: (context, i) {
+        final s = projects[i];
+        return ListTile(
+          leading: const Icon(Icons.grid_on_outlined),
+          title: Text(s.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            '${s.width}x${s.height} · ${s.colorCount} 色 · ${_formatDate(s.updatedAt)}',
+            style: theme.textTheme.bodySmall,
+          ),
+          onTap: () => _open(s),
+        );
+      },
+    );
+  }
+
+  static String _formatDate(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0) return '今天';
+    if (diff.inDays == 1) return '昨天';
+    if (diff.inDays < 30) return '${diff.inDays} 天前';
+    return '${dt.year}/${dt.month}/${dt.day}';
+  }
+}
