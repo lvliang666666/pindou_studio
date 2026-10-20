@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 
 import '../core/converter.dart';
 import '../core/palette.dart';
+import '../theme/pindou_theme.dart';
 
 /// 图纸画布：绘制拼豆网格、色块、色号，支持缩放、平移与画笔涂色。
 class PatternCanvas extends StatefulWidget {
   const PatternCanvas({
     super.key,
     required this.pattern,
+    required this.colors,
     this.showGrid = true,
     this.showRuler = true,
     this.onCellTap,
@@ -22,6 +24,11 @@ class PatternCanvas extends StatefulWidget {
   });
 
   final BeadPattern? pattern;
+
+  /// 画布配色（网格线/标尺/虚线/遮罩），随主题切换。
+  /// 变化时位图缓存失效并重新光栅化（见 didUpdateWidget）。
+  final PindouCanvasColors colors;
+
   final bool showGrid;
 
   /// 是否显示行号/列号标尺与底板分界线。
@@ -62,6 +69,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
   BeadPattern? _rasterPattern;
   bool _rasterShowGrid = true;
   bool _rasterShowRuler = true;
+  PindouCanvasColors? _rasterColors;
 
   /// 正在光栅化（避免重复提交）。
   bool _rasterizing = false;
@@ -142,13 +150,14 @@ class _PatternCanvasState extends State<PatternCanvas> {
         p.height != oldWidget.pattern!.height)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _fitToView(p));
     }
-    // 图纸/显示选项变化：使位图缓存失效并重新光栅化。
+    // 图纸/显示选项/主题配色变化：使位图缓存失效并重新光栅化。
     // 笔画中跳过：涂色由叠加层即时显示，笔画结束（onStrokeEnd）后统一重光栅化。
     // 延迟到帧渲染完成后执行，避免与状态层重建同帧叠加。
     if (!_painting &&
         (p != _rasterPattern ||
             widget.showGrid != _rasterShowGrid ||
-            widget.showRuler != _rasterShowRuler)) {
+            widget.showRuler != _rasterShowRuler ||
+            widget.colors != _rasterColors)) {
       _scheduleRasterizeAfterFrame();
     }
   }
@@ -168,7 +177,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
       return;
     }
     // 增量模式仅当：有脏格子、旧位图存在、旧位图对应同一 pattern 尺寸
-    // 且显示选项未变（否则内容结构不同，必须全量）。
+    // 且显示选项与主题配色未变（否则内容结构不同，必须全量）。
+    // 配色必须一致：新色补线画在旧色位图上必然错乱。
     final dirty = _pendingDirtyCells;
     final canIncremental = dirty != null &&
         dirty.isNotEmpty &&
@@ -177,7 +187,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterPattern!.width == p.width &&
         _rasterPattern!.height == p.height &&
         _rasterShowGrid == widget.showGrid &&
-        _rasterShowRuler == widget.showRuler;
+        _rasterShowRuler == widget.showRuler &&
+        _rasterColors == widget.colors;
     _pendingDirtyCells = null;
     try {
       // 2x 超采样：放大到 200% 仍清晰。
@@ -264,11 +275,11 @@ class _PatternCanvasState extends State<PatternCanvas> {
           final thin = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1
-            ..color = Colors.black26;
+            ..color = widget.colors.gridThin;
           final thick = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2
-            ..color = Colors.black45;
+            ..color = widget.colors.gridMajor;
           for (final entry in vSegs.entries) {
             final isMajor = entry.key % 10 == 0;
             final x = entry.key * cell;
@@ -290,7 +301,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
           final dashPaint = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5
-            ..color = Colors.deepOrange.withValues(alpha: 0.65);
+            ..color = widget.colors.boardDash;
           final cell = _baseCell;
           for (final (x, y, _) in dirty) {
             final l = x * cell, t = y * cell;
@@ -326,6 +337,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
           showGrid: widget.showGrid,
           showRuler: widget.showRuler,
           cell: _baseCell,
+          colors: widget.colors,
         ).paint(canvas, Size(w.toDouble(), h.toDouble()));
       }
       final picture = recorder.endRecording();
@@ -340,6 +352,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterPattern = p;
         _rasterShowGrid = widget.showGrid;
         _rasterShowRuler = widget.showRuler;
+        _rasterColors = widget.colors;
       });
       old?.dispose();
     } finally {
@@ -506,14 +519,15 @@ class _PatternCanvasState extends State<PatternCanvas> {
   Widget build(BuildContext context) {
     final pattern = widget.pattern;
     if (pattern == null) {
-      return const Center(
+      final colors = widget.colors;
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.grid_off, size: 64, color: Colors.grey),
-            SizedBox(height: 12),
+            Icon(Icons.grid_off, size: 64, color: colors.rulerText),
+            const SizedBox(height: 12),
             Text('请先导入图片并生成图纸',
-                style: TextStyle(color: Colors.grey, fontSize: 16)),
+                style: TextStyle(color: colors.rulerText, fontSize: 16)),
           ],
         ),
       );
@@ -583,6 +597,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
                                 showGrid: widget.showGrid,
                                 showRuler: widget.showRuler,
                                 cell: _baseCell,
+                                colors: widget.colors,
                               )
                             : null,
                         cell: _baseCell,
@@ -738,14 +753,17 @@ class _PatternPainter extends CustomPainter {
     required this.showGrid,
     required this.showRuler,
     required this.cell,
+    required this.colors,
   });
 
   final BeadPattern pattern;
   final bool showGrid;
   final bool showRuler;
   final double cell;
+  final PindouCanvasColors colors;
 
   /// 标尺文字跨帧缓存：(文本, 格子尺寸) -> 已排版 TextPainter。
+  /// 主题切换时清空（文字颜色变了，缓存的排版结果作废）。
   static final Map<(String, double), TextPainter> _rulerTextCache = {};
 
   @override
@@ -802,7 +820,7 @@ class _PatternPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1
-          ..color = Colors.black26,
+          ..color = colors.gridThin,
       );
       // 每 10 格加深线，方便对照。
       final majorPath = Path();
@@ -819,7 +837,7 @@ class _PatternPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2
-          ..color = Colors.black45,
+          ..color = colors.gridMajor,
       );
     }
 
@@ -829,7 +847,7 @@ class _PatternPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
-        ..color = Colors.black87,
+        ..color = colors.patternBorder,
     );
 
     // 行号/列号标尺（每 5 格标注）与 29 格底板分界线。
@@ -837,7 +855,7 @@ class _PatternPainter extends CustomPainter {
       const rulerStep = 5;
       const boardSize = 29;
       final labelStyle = TextStyle(
-        color: Colors.black54,
+        color: colors.rulerText,
         fontSize: cell * 0.42,
         fontWeight: FontWeight.w600,
       );
@@ -875,7 +893,7 @@ class _PatternPainter extends CustomPainter {
       final dashPaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5
-        ..color = Colors.deepOrange.withValues(alpha: 0.65);
+        ..color = colors.boardDash;
       for (int x = boardSize; x < pattern.width; x += boardSize) {
         drawDashedLine(
           canvas, dashPaint,
@@ -896,7 +914,8 @@ class _PatternPainter extends CustomPainter {
     return oldDelegate.pattern != pattern ||
         oldDelegate.showGrid != showGrid ||
         oldDelegate.showRuler != showRuler ||
-        oldDelegate.cell != cell;
+        oldDelegate.cell != cell ||
+        oldDelegate.colors != colors;
   }
 }
 
