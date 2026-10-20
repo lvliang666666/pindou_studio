@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pindou_studio/core/converter.dart';
 import 'package:pindou_studio/state/editor_state.dart';
+import 'package:pindou_studio/theme/pindou_theme.dart';
+import 'package:pindou_studio/theme/theme_controller.dart';
 import 'package:pindou_studio/ui/export_service.dart';
 import 'package:pindou_studio/ui/editor/editor_page.dart';
 import 'package:pindou_studio/ui/pattern_canvas.dart';
@@ -12,9 +14,11 @@ void main() {
   testWidgets('编辑器渲染：标题与关键控件存在', (tester) async {
     final state = EditorState();
     addTearDown(state.dispose);
+    final themeController = ThemeController();
+    addTearDown(themeController.dispose);
 
     await tester.pumpWidget(
-      MaterialApp(home: EditorPage(state: state)),
+      MaterialApp(home: EditorPage(state: state, themeController: themeController)),
     );
     await tester.pumpAndSettle();
 
@@ -53,6 +57,7 @@ void main() {
         home: Scaffold(
           body: PatternCanvas(
             pattern: pattern,
+            colors: PindouCanvasColors.light,
             onCellTap: (x, y) {
               tappedX = x;
               tappedY = y;

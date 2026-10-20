@@ -7,8 +7,11 @@ import 'package:flutter/services.dart';
 import '../../data/project_model.dart';
 import '../../data/project_repository.dart';
 import '../../state/editor_state.dart';
+import '../../theme/pindou_theme.dart';
+import '../../theme/theme_controller.dart';
 import '../export_service.dart';
 import '../pattern_canvas.dart';
+import '../settings_dialog.dart';
 
 /// 编辑器页面：参数区 + 图纸画布 + 统计导出区。
 ///
@@ -17,9 +20,12 @@ import '../pattern_canvas.dart';
 /// - 中屏（>=700）：两栏（画布 + 侧面板，参数/统计切换）
 /// - 窄屏（手机）：画布全屏 + 底部弹出面板（参数/统计二选一）
 class EditorPage extends StatefulWidget {
-  const EditorPage({super.key, required this.state});
+  const EditorPage({super.key, required this.state, required this.themeController});
 
   final EditorState state;
+
+  /// 主题控制器：设置对话框切换主题用。
+  final ThemeController themeController;
 
   @override
   State<EditorPage> createState() => _EditorPageState();
@@ -181,6 +187,12 @@ class _EditorPageState extends State<EditorPage> {
               ),
             ],
           ),
+          IconButton(
+            tooltip: '设置',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () =>
+                showSettingsDialog(context, widget.themeController),
+          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -336,15 +348,17 @@ class _EditorPageState extends State<EditorPage> {
   /// 画布区域（三处布局共用）。
   Widget _buildCanvas(BuildContext context, EditorState state) {
     final pattern = state.pattern;
+    final canvasColors = context.canvasColors;
     return Stack(
       children: [
         // 画布始终挂载：转换完成后先在遮罩下完成重绘，
         // 重绘帧结束后才移除遮罩（见 _hideOverlayNextFrame）。
         Container(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          color: canvasColors.canvasBg,
           padding: const EdgeInsets.all(16),
           child: PatternCanvas(
             pattern: pattern,
+            colors: canvasColors,
             showGrid: _showGrid,
             brushCode: state.brushCode,
             onPaintCell: (x, y) => _paintCell(state, x, y),
@@ -355,22 +369,22 @@ class _EditorPageState extends State<EditorPage> {
           ),
         ),
         if (state.converting || _hideOverlayNextFrame)
-          const Positioned.fill(
+          Positioned.fill(
             child: ColoredBox(
-              color: Color(0xB3FFFFFF),
+              color: canvasColors.overlayMask,
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(
+                    const SizedBox(
                       width: 44,
                       height: 44,
                       child: CircularProgressIndicator(strokeWidth: 3),
                     ),
-                    SizedBox(height: 14),
+                    const SizedBox(height: 14),
                     Text('正在生成图纸…',
                         style: TextStyle(
-                            fontSize: 15, color: Colors.black87)),
+                            fontSize: 15, color: canvasColors.overlayText)),
                   ],
                 ),
               ),
@@ -749,10 +763,10 @@ class _EditorPageState extends State<EditorPage> {
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     children: [
-                      _statRow('图纸尺寸', '${pattern.width} x ${pattern.height}'),
-                      _statRow('总豆数', '${pattern.totalBeads}'),
-                      _statRow('颜色数', '${pattern.colorCount}'),
-                      _statRow('底板数', '${pattern.boardCount} (29x29)'),
+                      _statRow('图纸尺寸', '${pattern.width} x ${pattern.height}', context),
+                      _statRow('总豆数', '${pattern.totalBeads}', context),
+                      _statRow('颜色数', '${pattern.colorCount}', context),
+                      _statRow('底板数', '${pattern.boardCount} (29x29)', context),
                     ],
                   ),
                 ),
@@ -810,8 +824,10 @@ class _EditorPageState extends State<EditorPage> {
             ),
           Expanded(
             child: pattern == null
-                ? const Center(
-                    child: Text('暂无数据', style: TextStyle(color: Colors.grey)))
+                ? Center(
+                    child: Text('暂无数据',
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.outline)))
                 : ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     itemCount: pattern.counts.length,
@@ -834,7 +850,7 @@ class _EditorPageState extends State<EditorPage> {
                             border: Border.all(
                               color: isBrush
                                   ? Theme.of(context).colorScheme.primary
-                                  : Colors.black26,
+                                  : Theme.of(context).colorScheme.outline,
                               width: isBrush ? 2.5 : 1,
                             ),
                           ),
@@ -856,13 +872,15 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
-  Widget _statRow(String label, String value) {
+  Widget _statRow(String label, String value, BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13, color: Theme.of(context).colorScheme.outline)),
           Text(value,
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
         ],
@@ -1074,7 +1092,7 @@ class _ColorPickerDialog extends StatelessWidget {
                     border: Border.all(
                       color: c.code == currentCode
                           ? Theme.of(context).colorScheme.primary
-                          : Colors.black12,
+                          : Theme.of(context).colorScheme.outlineVariant,
                       width: c.code == currentCode ? 2 : 1,
                     ),
                     borderRadius: BorderRadius.circular(8),
@@ -1086,7 +1104,8 @@ class _ColorPickerDialog extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: Color(c.argb),
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: Colors.black12),
+                          border: Border.all(
+                              color: Theme.of(context).colorScheme.outlineVariant),
                         ),
                       ),
                       const SizedBox(height: 4),
