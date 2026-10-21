@@ -50,3 +50,6 @@ releases/
 
 # 本地 release 构建产物副本（subst 构建方案的中转，不入库）
 build_release_latest/
+
+# 验收台账：本机协作过程记录（验收方式含本机路径/实例操作），个人资产不入公开仓库
+/ACCEPTANCE.md
