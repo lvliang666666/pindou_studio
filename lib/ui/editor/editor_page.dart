@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
+import 'package:printing/printing.dart';
 
 import '../../data/project_model.dart';
 import '../../data/project_repository.dart';
@@ -11,6 +13,7 @@ import '../../theme/pindou_theme.dart';
 import '../../theme/theme_controller.dart';
 import '../export_service.dart';
 import '../pattern_canvas.dart';
+import '../print_service.dart';
 import '../settings_dialog.dart';
 
 /// 编辑器页面：参数区 + 图纸画布 + 统计导出区。
@@ -812,6 +815,35 @@ class _EditorPageState extends State<EditorPage> {
                     style: const TextStyle(fontSize: 13)),
               ),
             ),
+          if (pattern != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: state.pattern == null
+                          ? null
+                          : () => _printPattern(state.pattern!),
+                      icon: const Icon(Icons.print_outlined),
+                      label: const Text('打印',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: state.pattern == null
+                          ? null
+                          : () => _exportPdf(state.pattern!),
+                      icon: const Icon(Icons.picture_as_pdf_outlined),
+                      label: const Text('导出 PDF',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (state.manualEdits.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -1000,6 +1032,65 @@ class _EditorPageState extends State<EditorPage> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已保存：$path')),
+      );
+    }
+  }
+
+  /// 打印：调起系统打印对话框（printing 包内置 PDF 预览）。
+  Future<void> _printPattern(BeadPattern pattern) async {
+    final state = widget.state;
+    final name = state.projectName.isNotEmpty
+        ? state.projectName
+        : (state.fileName ?? '拼豆图纸');
+    try {
+      await Printing.layoutPdf(
+        onLayout: (format) =>
+            PrintService.buildPdf(pattern, projectName: name),
+        name: name,
+        format: const PdfPageFormat(595, 842, marginAll: 0),
+        usePrinterSettings: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('打印失败：$e')),
+      );
+    }
+  }
+
+  /// 导出 PDF 文件（A4 分板排版，与打印同一生成逻辑）。
+  Future<void> _exportPdf(BeadPattern pattern) async {
+    final state = widget.state;
+    final name = state.projectName.isNotEmpty
+        ? state.projectName
+        : (state.fileName ?? '拼豆图纸');
+    final suggestedName = 'pindou_${pattern.width}x${pattern.height}.pdf';
+    final location = await getSaveLocation(
+      suggestedName: suggestedName,
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'PDF', extensions: ['pdf'])
+      ],
+    );
+    if (location == null) return;
+    var path = location.path;
+    if (!path.toLowerCase().endsWith('.pdf')) {
+      path = '$path.pdf';
+    }
+    try {
+      final bytes =
+          await PrintService.buildPdf(pattern, projectName: name);
+      final file = XFile.fromData(bytes,
+          mimeType: 'application/pdf', name: suggestedName);
+      await file.saveTo(path);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已保存：$path')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败：$e')),
       );
     }
   }
