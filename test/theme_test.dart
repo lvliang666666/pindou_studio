@@ -46,7 +46,7 @@ void main() {
     });
   });
 
-  group('ThemeController 持久化', () {
+  group('AppSettings 持久化', () {
     late Directory tempDir;
 
     setUp(() {
@@ -58,10 +58,10 @@ void main() {
     });
 
     test('select 后落盘，重新 load 恢复', () async {
-      final controller = ThemeController(storageRoot: tempDir);
-      addTearDown(controller.dispose);
-      await controller.select('hacker');
-      expect(controller.current.id, 'hacker');
+      final settings = AppSettings(storageRoot: tempDir);
+      addTearDown(settings.dispose);
+      await settings.setTheme('hacker');
+      expect(settings.theme.id, 'hacker');
 
       // 落盘文件存在且内容正确。
       final file = File(
@@ -72,10 +72,10 @@ void main() {
       expect(json['themeId'], 'hacker');
 
       // 新控制器 load 后恢复。
-      final controller2 = ThemeController(storageRoot: tempDir);
-      addTearDown(controller2.dispose);
-      await controller2.load();
-      expect(controller2.current.id, 'hacker');
+      final settings2 = AppSettings(storageRoot: tempDir);
+      addTearDown(settings2.dispose);
+      await settings2.load();
+      expect(settings2.theme.id, 'hacker');
     });
 
     test('坏 JSON 回退默认主题', () async {
@@ -84,10 +84,10 @@ void main() {
         ..createSync(recursive: true);
       File('${dir.path}${Platform.pathSeparator}settings.json')
           .writeAsStringSync('{not valid json');
-      final controller = ThemeController(storageRoot: tempDir);
-      addTearDown(controller.dispose);
-      await controller.load();
-      expect(controller.current.id, 'default');
+      final settings = AppSettings(storageRoot: tempDir);
+      addTearDown(settings.dispose);
+      await settings.load();
+      expect(settings.theme.id, 'default');
     });
 
     test('未知 themeId 回退默认主题', () async {
@@ -96,20 +96,20 @@ void main() {
         ..createSync(recursive: true);
       File('${dir.path}${Platform.pathSeparator}settings.json')
           .writeAsStringSync('{"themeId": "ghost"}');
-      final controller = ThemeController(storageRoot: tempDir);
-      addTearDown(controller.dispose);
-      await controller.load();
-      expect(controller.current.id, 'default');
+      final settings = AppSettings(storageRoot: tempDir);
+      addTearDown(settings.dispose);
+      await settings.load();
+      expect(settings.theme.id, 'default');
     });
 
     test('select 相同主题不重复通知', () async {
-      final controller = ThemeController(storageRoot: tempDir);
-      addTearDown(controller.dispose);
+      final settings = AppSettings(storageRoot: tempDir);
+      addTearDown(settings.dispose);
       var notified = 0;
-      controller.addListener(() => notified++);
-      await controller.select('default');
+      settings.addListener(() => notified++);
+      await settings.setTheme('default');
       expect(notified, 0, reason: '与当前主题相同不应通知');
-      await controller.select('codex');
+      await settings.setTheme('codex');
       expect(notified, 1);
     });
   });

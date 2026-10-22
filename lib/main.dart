@@ -8,7 +8,7 @@ void main() {
   runApp(const PindouStudioApp());
 }
 
-/// 应用根：持有主题控制器，打开即编辑器（单页直入，无图库首页）。
+/// 应用根：持有应用设置（主题/色卡），打开即编辑器（单页直入，无图库首页）。
 class PindouStudioApp extends StatefulWidget {
   const PindouStudioApp({super.key});
 
@@ -17,31 +17,31 @@ class PindouStudioApp extends StatefulWidget {
 }
 
 class _PindouStudioAppState extends State<PindouStudioApp> {
-  late final ThemeController _themeController;
+  late final AppSettings _settings;
 
   @override
   void initState() {
     super.initState();
-    _themeController = ThemeController();
-    // 异步读取持久化主题：首帧先以默认主题渲染，读完后通知重建。
-    _themeController.load();
+    _settings = AppSettings();
+    // 异步读取持久化设置：首帧先以默认渲染，读完后通知重建。
+    _settings.load();
   }
 
   @override
   void dispose() {
-    _themeController.dispose();
+    _settings.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: _themeController,
+      listenable: _settings,
       builder: (context, _) => MaterialApp(
         title: '拼豆工作室',
         debugShowCheckedModeBanner: false,
-        theme: _themeController.current.themeData,
-        home: _EditorHome(themeController: _themeController),
+        theme: _settings.theme.themeData,
+        home: _EditorHome(settings: _settings),
       ),
     );
   }
@@ -49,11 +49,11 @@ class _PindouStudioAppState extends State<PindouStudioApp> {
 
 /// 编辑器宿主：EditorState 在应用级持有，生命周期与进程一致；
 /// 项目的新建/打开/保存收敛到编辑器 AppBar（保存按钮 + 项目菜单），
-/// 主题设置入口同样在 AppBar（齿轮图标）。
+/// 主题与色卡设置入口同样在 AppBar（齿轮图标）。
 class _EditorHome extends StatefulWidget {
-  const _EditorHome({required this.themeController});
+  const _EditorHome({required this.settings});
 
-  final ThemeController themeController;
+  final AppSettings settings;
 
   @override
   State<_EditorHome> createState() => _EditorHomeState();
@@ -78,7 +78,7 @@ class _EditorHomeState extends State<_EditorHome> {
   Widget build(BuildContext context) {
     return EditorPage(
       state: _editorState,
-      themeController: widget.themeController,
+      settings: widget.settings,
     );
   }
 }

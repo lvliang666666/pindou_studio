@@ -14,11 +14,11 @@ void main() {
   testWidgets('编辑器渲染：标题与关键控件存在', (tester) async {
     final state = EditorState();
     addTearDown(state.dispose);
-    final themeController = ThemeController();
-    addTearDown(themeController.dispose);
+    final settings = AppSettings();
+    addTearDown(settings.dispose);
 
     await tester.pumpWidget(
-      MaterialApp(home: EditorPage(state: state, themeController: themeController)),
+      MaterialApp(home: EditorPage(state: state, settings: settings)),
     );
     await tester.pumpAndSettle();
 
