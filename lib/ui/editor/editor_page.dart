@@ -23,12 +23,12 @@ import '../settings_dialog.dart';
 /// - 中屏（>=700）：两栏（画布 + 侧面板，参数/统计切换）
 /// - 窄屏（手机）：画布全屏 + 底部弹出面板（参数/统计二选一）
 class EditorPage extends StatefulWidget {
-  const EditorPage({super.key, required this.state, required this.themeController});
+  const EditorPage({super.key, required this.state, required this.settings});
 
   final EditorState state;
 
-  /// 主题控制器：设置对话框切换主题用。
-  final ThemeController themeController;
+  /// 应用设置：设置对话框切换主题/色卡持久化用。
+  final AppSettings settings;
 
   @override
   State<EditorPage> createState() => _EditorPageState();
@@ -194,7 +194,7 @@ class _EditorPageState extends State<EditorPage> {
             tooltip: '设置',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () =>
-                showSettingsDialog(context, widget.themeController),
+                showSettingsDialog(context, widget.settings),
           ),
           const SizedBox(width: 4),
         ],
@@ -560,6 +560,36 @@ class _EditorPageState extends State<EditorPage> {
                 ),
               ),
             ],
+            const SizedBox(height: 16),
+            Text('拼豆色卡', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: state.paletteId,
+              isDense: true,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+              items: [
+                for (final set in BeadPalette.ordered)
+                  DropdownMenuItem(
+                    value: set.id,
+                    child: Text(
+                      '${set.displayName} · ${set.colors.length}色',
+                      style: const TextStyle(fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (v) {
+                if (v != null && v != state.paletteId) {
+                  setState(() => state.setPalette(v));
+                }
+              },
+            ),
             const SizedBox(height: 16),
             Text('图纸尺寸（豆数）',
                 style: Theme.of(context).textTheme.titleSmall),

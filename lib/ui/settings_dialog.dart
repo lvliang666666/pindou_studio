@@ -1,32 +1,34 @@
 import 'package:flutter/material.dart';
 
+import '../core/palette.dart';
 import '../theme/pindou_theme.dart';
 import '../theme/theme_controller.dart';
 
-/// 设置对话框：主题外观选择。
+/// 设置对话框：主题外观 + 拼豆色卡选择。
 ///
-/// 点击卡片立即切换（对话框不关，可连续试看效果），「完成」关闭。
+/// 点击立即切换（对话框不关，可连续试看效果），「完成」关闭。
 /// 卡片预览色取自各主题自身定义，不依赖当前主题。
-Future<void> showSettingsDialog(BuildContext context, ThemeController controller) {
+Future<void> showSettingsDialog(BuildContext context, AppSettings settings) {
   return showDialog<void>(
     context: context,
-    builder: (context) => _SettingsDialog(controller: controller),
+    builder: (context) => _SettingsDialog(settings: settings),
   );
 }
 
 class _SettingsDialog extends StatelessWidget {
-  const _SettingsDialog({required this.controller});
+  const _SettingsDialog({required this.settings});
 
-  final ThemeController controller;
+  final AppSettings settings;
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 640),
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Column(
+          child: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -48,7 +50,7 @@ class _SettingsDialog extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 12),
               ListenableBuilder(
-                listenable: controller,
+                listenable: settings,
                 builder: (context, _) => GridView.count(
                   crossAxisCount: 2,
                   shrinkWrap: true,
@@ -60,8 +62,27 @@ class _SettingsDialog extends StatelessWidget {
                     for (final theme in kPindouThemes)
                       _ThemeCard(
                         theme: theme,
-                        selected: controller.current.id == theme.id,
-                        onTap: () => controller.select(theme.id),
+                        selected: settings.theme.id == theme.id,
+                        onTap: () => settings.setTheme(theme.id),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('拼豆色卡',
+                  style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              ListenableBuilder(
+                listenable: settings,
+                builder: (context, _) => Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final set in BeadPalette.ordered)
+                      ChoiceChip(
+                        label: Text(set.displayName),
+                        selected: settings.paletteId == set.id,
+                        onSelected: (_) => settings.setPalette(set.id),
                       ),
                   ],
                 ),
@@ -75,6 +96,7 @@ class _SettingsDialog extends StatelessWidget {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),

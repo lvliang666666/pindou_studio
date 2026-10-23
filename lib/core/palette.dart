@@ -1,11 +1,14 @@
-/// 拼豆色卡数据。
+/// 拼豆色卡：多品牌支持。
 ///
-/// 内置一套通用拼豆色卡（约 90 色），按色系分组。
-/// 每种颜色包含编号、名称与 RGB 值，编号采用常见拼豆品牌的
-/// 通用编号风格（如 A1、B12），便于对照实物。
+/// 内置 7 套色卡（通用卡 + 6 个品牌卡），见 palette_data.dart。
+/// [BeadPalette] 保留静态 API（colors/nearest/byCode/groups），
+/// 委托到"当前色卡"——现有调用方（转换引擎、UI、测试）无需改动；
+/// 切换色卡用 [BeadPalette.setActive]。
 library;
 
 import 'dart:math' as math;
+
+import 'palette_data.dart';
 
 /// 单个拼豆颜色。
 class BeadColor {
@@ -17,10 +20,10 @@ class BeadColor {
     required this.blue,
   });
 
-  /// 色号，如 "A1"。
+  /// 色号，如 "A1"（品牌内唯一）。
   final String code;
 
-  /// 颜色名称（中文）。
+  /// 颜色名称（中文或色号本身）。
   final String name;
 
   final int red;
@@ -49,52 +52,36 @@ class BeadColor {
   int get hashCode => code.hashCode;
 }
 
-/// 内置通用拼豆色卡。
-class BeadPalette {
-  BeadPalette._();
+/// 一套色卡：品牌名 + 颜色列表 + 派生索引。
+class BeadPaletteSet {
+  BeadPaletteSet._(this.id, this.displayName, List<BeadColor> colors)
+      : colors = List.unmodifiable(colors),
+        byCode = {for (final c in colors) c.code: c},
+        groups = _buildGroups(colors),
+        _sorted = _buildSorted(colors);
+
+  /// 稳定标识（持久化用）：'default'/'mard'/'coco'/'artkal'/
+  /// 'artkal-mini'/'hama'/'perler'。
+  final String id;
+
+  /// 显示名。
+  final String displayName;
 
   /// 全部颜色（不可变）。
-  static final List<BeadColor> colors = List.unmodifiable(_buildColors());
-
-  /// 按色系分组的颜色。
-  static final Map<String, List<BeadColor>> groups = _buildGroups();
+  final List<BeadColor> colors;
 
   /// 编号 -> 颜色 的快速索引。
-  static final Map<String, BeadColor> byCode = {
-    for (final c in colors) c.code: c,
-  };
+  final Map<String, BeadColor> byCode;
 
-  /// 最近邻查找结构（懒构建，按亮度排序）。
-  static List<BeadColor>? _sortedCache;
+  /// 按色系分组的颜色。
+  final Map<String, List<BeadColor>> groups;
 
-  /// 色系判定：按 HSL 色相与明度归类。
-  static String groupOf(BeadColor c) {
-    final hsl = _rgbToHsl(c.red, c.green, c.blue);
-    final h = hsl[0], s = hsl[1], l = hsl[2];
-    if (s <= 0.10) {
-      if (l >= 0.75) return '白色';
-      if (l >= 0.40) return '灰色';
-      return '黑色';
-    }
-    final deg = h * 360;
-    if (deg < 15 || deg >= 345) return '红色';
-    if (deg < 45) return '橙色';
-    if (deg < 70) return '黄色';
-    if (deg < 165) return '绿色';
-    if (deg < 200) return '青色';
-    if (deg < 260) return '蓝色';
-    if (deg < 300) return '紫色';
-    if (deg < 345) return '粉色';
-    return '其他';
-  }
+  /// 按亮度排序的副本（最近色查找用，懒构建已在此完成）。
+  final List<BeadColor> _sorted;
 
-  /// 找到与给定 RGB 最接近的拼豆颜色。
-  ///
-  /// 使用加权欧氏距离（人眼对绿色最敏感），比纯 RGB 距离更接近观感。
-  /// 先按亮度二分定位，再向两侧局部搜索，复杂度约 O(log n + k)。
-  static BeadColor nearest(int r, int g, int b) {
-    _sortedCache ??= _buildSorted();
-    final list = _sortedCache!;
+  /// 找到与给定 RGB 最接近的拼豆颜色（加权欧氏距离 + 亮度二分）。
+  BeadColor nearest(int r, int g, int b) {
+    final list = _sorted;
     final targetL = _luma(r, g, b);
     int lo = 0, hi = list.length;
     while (lo < hi) {
@@ -138,18 +125,105 @@ class BeadPalette {
     return 2.0 * dr * dr + 4.0 * dg * dg + 3.0 * db * db;
   }
 
-  static List<BeadColor> _buildSorted() {
+  static List<BeadColor> _buildSorted(List<BeadColor> colors) {
     final list = List<BeadColor>.of(colors);
     list.sort((a, b) => _lumaOf(a).compareTo(_lumaOf(b)));
     return list;
   }
 
-  static Map<String, List<BeadColor>> _buildGroups() {
+  static Map<String, List<BeadColor>> _buildGroups(List<BeadColor> colors) {
     final map = <String, List<BeadColor>>{};
     for (final c in colors) {
-      map.putIfAbsent(groupOf(c), () => []).add(c);
+      map.putIfAbsent(BeadPalette.groupOf(c), () => []).add(c);
     }
     return map;
+  }
+}
+
+/// 色卡注册表与"当前色卡"静态门面。
+class BeadPalette {
+  BeadPalette._();
+
+  /// 全部内置色卡（id -> 实例）。
+  static final Map<String, BeadPaletteSet> all = {
+    for (final def in _defs) def.id: def,
+  };
+
+  /// 色卡定义顺序（设置页展示顺序）。
+  static final List<BeadPaletteSet> ordered = List.unmodifiable(_defs);
+
+  static final List<BeadPaletteSet> _defs = [
+    BeadPaletteSet._('default', '通用色卡', _buildDefaultColors()),
+    BeadPaletteSet._('mard', 'MARD（291 色）', [for (final r in kMardRows) _parseRow(r)]),
+    BeadPaletteSet._('coco', 'COCO（291 色）', [for (final r in kCocoRows) _parseRow(r)]),
+    BeadPaletteSet._('artkal', 'Artkal（176 色）', [for (final r in kArtkalRows) _parseRow(r)]),
+    BeadPaletteSet._('artkal-mini', 'Artkal Mini（221 色）', [for (final r in kArtkalMiniRows) _parseRow(r)]),
+    BeadPaletteSet._('hama', 'Hama（89 色）', [for (final r in kHamaRows) _parseRow(r)]),
+    BeadPaletteSet._('perler', 'Perler（117 色）', [for (final r in kPerlerRows) _parseRow(r)]),
+  ];
+
+  /// 当前色卡（默认通用卡）。
+  static BeadPaletteSet _active = all['default']!;
+
+  /// 当前生效的色卡。
+  static BeadPaletteSet get active => _active;
+
+  /// 切换当前色卡；未知 id 返回 false 且不改动。
+  static bool setActive(String id) {
+    final set = all[id];
+    if (set == null || identical(set, _active)) return false;
+    _active = set;
+    return true;
+  }
+
+  /// 按 id 取色卡；未知 id 回退通用卡。
+  static BeadPaletteSet byId(String id) => all[id] ?? all['default']!;
+
+  // ---------- 静态门面（委托到当前色卡，兼容既有调用方） ----------
+
+  /// 当前色卡的全部颜色。
+  static List<BeadColor> get colors => _active.colors;
+
+  /// 当前色卡的 编号 -> 颜色 索引。
+  static Map<String, BeadColor> get byCode => _active.byCode;
+
+  /// 当前色卡的色系分组。
+  static Map<String, List<BeadColor>> get groups => _active.groups;
+
+  /// 当前色卡的最近色查找。
+  static BeadColor nearest(int r, int g, int b) => _active.nearest(r, g, b);
+
+  /// 色系判定：按 HSL 色相与明度归类（所有色卡共用）。
+  static String groupOf(BeadColor c) {
+    final hsl = _rgbToHsl(c.red, c.green, c.blue);
+    final h = hsl[0], s = hsl[1], l = hsl[2];
+    if (s <= 0.10) {
+      if (l >= 0.75) return '白色';
+      if (l >= 0.40) return '灰色';
+      return '黑色';
+    }
+    final deg = h * 360;
+    if (deg < 15 || deg >= 345) return '红色';
+    if (deg < 45) return '橙色';
+    if (deg < 70) return '黄色';
+    if (deg < 100) return '黄绿色';
+    if (deg < 160) return '绿色';
+    if (deg < 200) return '青色';
+    if (deg < 260) return '蓝色';
+    if (deg < 300) return '紫色';
+    if (deg < 345) return '粉色';
+    return '其他';
+  }
+
+  static BeadColor _parseRow(String row) {
+    final parts = row.split(',');
+    return BeadColor(
+      code: parts[0],
+      name: parts[1],
+      red: int.parse(parts[2]),
+      green: int.parse(parts[3]),
+      blue: int.parse(parts[4]),
+    );
   }
 
   static List<double> _rgbToHsl(int r, int g, int b) {
@@ -171,7 +245,8 @@ class BeadPalette {
     return [h / 6, s, l];
   }
 
-  static List<BeadColor> _buildColors() {
+  /// 通用色卡（历史内置 83 色，带中文名）。
+  static List<BeadColor> _buildDefaultColors() {
     const rows = <String>[
       // code,name,r,g,b
       // —— 白色系
@@ -271,17 +346,6 @@ class BeadPalette {
       'M5,夜光绿,190,240,170',
       'M6,透明白,250,250,245',
     ];
-    return [for (final row in rows) _parse(row)];
-  }
-
-  static BeadColor _parse(String row) {
-    final parts = row.split(',');
-    return BeadColor(
-      code: parts[0],
-      name: parts[1],
-      red: int.parse(parts[2]),
-      green: int.parse(parts[3]),
-      blue: int.parse(parts[4]),
-    );
+    return [for (final row in rows) _parseRow(row)];
   }
 }

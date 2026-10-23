@@ -27,6 +27,7 @@ class SavedProject {
     this.brightness = 0,
     this.contrast = 0,
     this.colorLimit = 0,
+    this.paletteId = 'default',
   });
 
   /// 唯一 id（同时是存储文件名，不含扩展名）。
@@ -59,6 +60,9 @@ class SavedProject {
   final int contrast;
   final int colorLimit;
 
+  /// 所用色卡 id（旧项目无此字段时回退 'default'）。
+  final String paletteId;
+
   /// 从图纸构建项目。
   factory SavedProject.fromPattern({
     required String id,
@@ -72,6 +76,7 @@ class SavedProject {
     int brightness = 0,
     int contrast = 0,
     int colorLimit = 0,
+    String paletteId = 'default',
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -92,6 +97,7 @@ class SavedProject {
       brightness: brightness,
       contrast: contrast,
       colorLimit: colorLimit,
+      paletteId: paletteId,
     );
   }
 
@@ -144,6 +150,7 @@ class SavedProject {
         'brightness': brightness,
         'contrast': contrast,
         'colorLimit': colorLimit,
+        'paletteId': paletteId,
       };
 
   String toJsonString() => jsonEncode(toJson());
@@ -171,6 +178,7 @@ class SavedProject {
       brightness: json['brightness'] as int? ?? 0,
       contrast: json['contrast'] as int? ?? 0,
       colorLimit: json['colorLimit'] as int? ?? 0,
+      paletteId: json['paletteId'] as String? ?? 'default',
     );
   }
 

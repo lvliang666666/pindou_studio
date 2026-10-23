@@ -64,6 +64,37 @@ class EditorState extends ChangeNotifier {
   /// 锁定宽高比：修改宽度时按原图比例自动计算高度（反之亦然）。
   bool lockRatio = true;
 
+  /// 当前色卡 id（BeadPalette.active.id 的镜像，供 UI 与项目保存）。
+  String paletteId = 'default';
+
+  /// 切换色卡：立即生效并重新转换（原图在时）或仅刷新（已加载项目）。
+  void setPalette(String id) {
+    if (!BeadPalette.setActive(id)) return;
+    paletteId = BeadPalette.active.id;
+    // 画笔色号属于旧色卡，切换后失效。
+    brushCode = null;
+    if (_pixels != null) {
+      scheduleReconvert();
+    } else {
+      // 已加载项目（无原图）：色号可能在新色卡中不存在，
+      // 重建 pattern（无效色号格子置为色卡首色）。
+      _remapPatternToActivePalette();
+      notifyListeners();
+    }
+    hasUnsavedChanges = true;
+  }
+
+  /// 把当前 pattern 的色号重映射到当前色卡（项目加载/色卡切换用）。
+  void _remapPatternToActivePalette() {
+    final p = pattern;
+    if (p == null) return;
+    final byCode = BeadPalette.byCode;
+    final cells = [
+      for (final c in p.cells) byCode[c.code] ?? byCode.values.first,
+    ];
+    pattern = _rebuildCounts(cells, p.width, p.height);
+  }
+
   /// 手动编辑记录：坐标 -> 颜色编号。重新转换时保留同坐标的编辑。
   final Map<String, String> manualEdits = {};
 
@@ -531,6 +562,7 @@ class EditorState extends ChangeNotifier {
       brightness: brightness.round(),
       contrast: contrast.round(),
       colorLimit: colorLimit,
+      paletteId: paletteId,
       createdAt: createdAt,
       updatedAt: now,
     );
@@ -546,6 +578,10 @@ class EditorState extends ChangeNotifier {
 
   /// 从已保存项目恢复编辑器状态。
   Future<void> loadProject(SavedProject project) async {
+    // 先切到项目所用色卡（旧项目无记录时回退通用卡），
+    // toPattern 的色号解析依赖当前色卡。
+    BeadPalette.setActive(project.paletteId);
+    paletteId = BeadPalette.active.id;
     final p = project.toPattern();
     if (p == null) {
       throw const FormatException('项目数据损坏，无法加载');
@@ -597,6 +633,8 @@ class EditorState extends ChangeNotifier {
     brightness = 0;
     contrast = 0;
     colorLimit = 0;
+    BeadPalette.setActive('default');
+    paletteId = 'default';
     gridWidthCtrl.text = '29';
     gridHeightCtrl.text = '29';
     _undoStack.clear();
