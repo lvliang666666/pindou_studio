@@ -251,6 +251,40 @@ void main() {
       final sourcesDir = Directory('${tempDir.path}/sources');
       expect(sourcesDir.listSync().whereType<File>(), isEmpty);
     });
+
+    test('导入历史：记录后可列出，新→旧排序', () async {
+      await repo.recordImport(Uint8List.fromList([1]), 'a.png');
+      await repo.recordImport(Uint8List.fromList([2]), 'b.jpg');
+      final records = await repo.listImports();
+      expect(records.length, 2);
+      expect(records[0].fileName, 'b.jpg'); // 最新在前
+      expect(records[1].fileName, 'a.png');
+      // 字节可还原。
+      expect(await records[1].file.readAsBytes(), [1]);
+    });
+
+    test('导入历史：文件名非法字符被替换', () async {
+      await repo.recordImport(Uint8List.fromList([1]), 'a<b>:c?.png');
+      final records = await repo.listImports();
+      expect(records.length, 1);
+      expect(records[0].fileName, 'a_b__c_.png');
+    });
+
+    test('导入历史：超出上限自动清理最旧的', () async {
+      for (var i = 0; i < ProjectRepository.maxImportHistory + 3; i++) {
+        await repo.recordImport(
+          Uint8List.fromList([i]),
+          'img$i.png',
+        );
+        // 文件名含毫秒时间戳，同毫秒内多次导入会互相覆盖——
+        // 主动错开时间保证每条独立。
+        await Future<void>.delayed(const Duration(milliseconds: 2));
+      }
+      final records = await repo.listImports();
+      expect(records.length, ProjectRepository.maxImportHistory);
+      // 最新的保留，最旧的 3 条被清理。
+      expect(records.first.fileName, endsWith('img14.png'));
+    });
   });
 
   group('EditorState 项目保存/加载', () {

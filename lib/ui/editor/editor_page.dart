@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -124,6 +125,8 @@ class _EditorPageState extends State<EditorPage> {
     try {
       final bytes = await file.readAsBytes();
       await widget.state.loadImage(bytes, file.name);
+      // 留存导入历史（尽力而为，失败不影响导入）。
+      unawaited(widget.state.repository.recordImport(bytes, file.name));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -131,6 +134,62 @@ class _EditorPageState extends State<EditorPage> {
         );
       }
     }
+  }
+
+  /// 从最近导入历史加载图片。
+  Future<void> _loadFromHistory(ImportRecord record) async {
+    try {
+      final bytes = await record.file.readAsBytes();
+      await widget.state.loadImage(bytes, record.fileName);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('加载失败：$e')),
+      );
+    }
+  }
+
+  /// 最近导入菜单（参数区「导入图片」旁的下拉入口）。
+  Future<void> _showRecentImports() async {
+    final records = await widget.state.repository.listImports();
+    if (!mounted) return;
+    if (records.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('还没有导入记录')),
+      );
+      return;
+    }
+    final theme = Theme.of(context);
+    final picked = await showDialog<ImportRecord>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('最近导入'),
+        children: [
+          for (final r in records.take(8))
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(r),
+              child: ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: Text(r.fileName,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(_formatImportDate(r.importedAt),
+                    style: theme.textTheme.bodySmall),
+                dense: true,
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked != null) _loadFromHistory(picked);
+  }
+
+  static String _formatImportDate(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0) return '今天';
+    if (diff.inDays == 1) return '昨天';
+    if (diff.inDays < 30) return '${diff.inDays} 天前';
+    return '${dt.year}/${dt.month}/${dt.day}';
   }
 
   /// 侧面板当前显示内容（中屏/窄屏用）：参数 or 统计。
@@ -547,6 +606,12 @@ class _EditorPageState extends State<EditorPage> {
               onPressed: state.converting ? null : _pickImage,
               icon: const Icon(Icons.image),
               label: const Text('导入图片'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: state.converting ? null : _showRecentImports,
+              icon: const Icon(Icons.history, size: 18),
+              label: const Text('最近导入'),
             ),
             if (state.previewImage != null) ...[
               const SizedBox(height: 12),

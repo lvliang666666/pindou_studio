@@ -34,6 +34,24 @@ class ProjectSummary {
   final bool hasThumbnail;
 }
 
+/// 最近导入记录（列表展示用）。
+class ImportRecord {
+  const ImportRecord({
+    required this.fileName,
+    required this.importedAt,
+    required this.file,
+  });
+
+  /// 导入时的文件名（展示用）。
+  final String fileName;
+
+  /// 导入时间。
+  final DateTime importedAt;
+
+  /// 留存副本的文件（读取字节用）。
+  final File file;
+}
+
 /// 项目仓库：基于文件系统的项目持久化。
 ///
 /// 目录结构：
@@ -42,6 +60,7 @@ class ProjectSummary {
 ///   projects/<id>.json      项目数据
 ///   thumbs/<id>.png         缩略图
 ///   sources/<id>.<ext>      原图字节（随项目留存，重转参数用）
+///   imports/<ts>_<name>     导入图片历史（最近导入快速重选用）
 /// ```
 /// 存储目录可通过 [storageRoot] 注入（测试用临时目录）。
 class ProjectRepository {
@@ -50,9 +69,13 @@ class ProjectRepository {
   /// 存储根目录（null = 用系统文档目录下的 PindouStudio）。
   final Directory? storageRoot;
 
+  /// 最近导入历史上限（超出后最旧的自动清理）。
+  static const int maxImportHistory = 12;
+
   Directory? _projectsDir;
   Directory? _thumbsDir;
   Directory? _sourcesDir;
+  Directory? _importsDir;
 
   Future<Directory> _ensureDirs() async {
     if (_projectsDir != null) {
@@ -63,6 +86,7 @@ class ProjectRepository {
     _projectsDir = root.childDir('projects')..createSync(recursive: true);
     _thumbsDir = root.childDir('thumbs')..createSync(recursive: true);
     _sourcesDir = root.childDir('sources')..createSync(recursive: true);
+    _importsDir = root.childDir('imports')..createSync(recursive: true);
     return _projectsDir!;
   }
 
@@ -235,6 +259,55 @@ class ProjectRepository {
     final thumb = _thumbFile(id);
     if (!thumb.existsSync()) return null;
     return await thumb.readAsBytes();
+  }
+
+  // ---------- 导入图片历史 ----------
+
+  /// 留存导入图片副本（imports/<毫秒时间戳>_<安全文件名>）。
+  /// 文件名非法字符替换为下划线；留存失败静默忽略（不影响导入主流程）。
+  Future<void> recordImport(Uint8List bytes, String fileName) async {
+    try {
+      await _ensureDirs();
+      final safe = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      if (safe.isEmpty || safe == '_') return;
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      await File('${_importsDir!.path}/${ts}_$safe')
+          .writeAsBytes(bytes, flush: true);
+      await _pruneImports();
+    } catch (_) {
+      // 历史留存是尽力而为的附加功能，失败不影响导入。
+    }
+  }
+
+  /// 列出最近导入（新→旧），超出上限的旧文件已由 [_pruneImports] 清理。
+  Future<List<ImportRecord>> listImports() async {
+    await _ensureDirs();
+    final records = <ImportRecord>[];
+    await for (final entity in _importsDir!.list()) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      final underscore = name.indexOf('_');
+      if (underscore <= 0) continue;
+      final ts = int.tryParse(name.substring(0, underscore));
+      if (ts == null) continue;
+      records.add(ImportRecord(
+        fileName: name.substring(underscore + 1),
+        importedAt: DateTime.fromMillisecondsSinceEpoch(ts),
+        file: entity,
+      ));
+    }
+    records.sort((a, b) => b.importedAt.compareTo(a.importedAt));
+    return records;
+  }
+
+  /// 清理超出上限的旧导入文件。
+  Future<void> _pruneImports() async {
+    final records = await listImports();
+    for (var i = maxImportHistory; i < records.length; i++) {
+      try {
+        await records[i].file.delete();
+      } catch (_) {}
+    }
   }
 
   /// 生成图纸缩略图 PNG（小尺寸纯色块网格，无文字）。
