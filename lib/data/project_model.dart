@@ -9,7 +9,8 @@ import '../core/palette.dart';
 /// - 图纸格子用「色号 + 行程长度（RLE）」编码，90 色色号都很短，
 ///   87x87 图纸 JSON 通常只有几 KB。
 /// - 手动编辑单独存（坐标 -> 色号），加载后可继续编辑/撤销语义一致。
-/// - 原图字节不存（体积大且转换参数可复现结果），只存原图文件名与尺寸做展示。
+/// - 原图字节不进 JSON（体积大），由仓库层存到 `sources/<id>.<ext>`，
+///   本模型只记录扩展名（sourceExt）与尺寸；无原图的旧项目照常打开。
 class SavedProject {
   SavedProject({
     required this.id,
@@ -23,6 +24,7 @@ class SavedProject {
     this.sourceFileName,
     this.sourceWidth,
     this.sourceHeight,
+    this.sourceExt,
     this.dither = true,
     this.brightness = 0,
     this.contrast = 0,
@@ -54,6 +56,10 @@ class SavedProject {
   final int? sourceWidth;
   final int? sourceHeight;
 
+  /// 原图扩展名（不含点，如 'png'/'jpg'）；null = 未留存原图。
+  /// 原图字节由 ProjectRepository 存取（`sources/<id>.<ext>`），不进 JSON。
+  final String? sourceExt;
+
   /// 转换参数快照（重新转换时可用）。
   final bool dither;
   final int brightness;
@@ -72,6 +78,7 @@ class SavedProject {
     String? sourceFileName,
     int? sourceWidth,
     int? sourceHeight,
+    String? sourceExt,
     bool dither = true,
     int brightness = 0,
     int contrast = 0,
@@ -93,6 +100,7 @@ class SavedProject {
       sourceFileName: sourceFileName,
       sourceWidth: sourceWidth,
       sourceHeight: sourceHeight,
+      sourceExt: sourceExt,
       dither: dither,
       brightness: brightness,
       contrast: contrast,
@@ -146,6 +154,7 @@ class SavedProject {
         if (sourceFileName != null) 'sourceFileName': sourceFileName,
         if (sourceWidth != null) 'sourceWidth': sourceWidth,
         if (sourceHeight != null) 'sourceHeight': sourceHeight,
+        if (sourceExt != null) 'sourceExt': sourceExt,
         'dither': dither,
         'brightness': brightness,
         'contrast': contrast,
@@ -174,6 +183,7 @@ class SavedProject {
       sourceFileName: json['sourceFileName'] as String?,
       sourceWidth: json['sourceWidth'] as int?,
       sourceHeight: json['sourceHeight'] as int?,
+      sourceExt: json['sourceExt'] as String?,
       dither: json['dither'] as bool? ?? true,
       brightness: json['brightness'] as int? ?? 0,
       contrast: json['contrast'] as int? ?? 0,
@@ -189,6 +199,15 @@ class SavedProject {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 生成新项目 id（时间戳 + 随机后缀，同时用作存储文件名）。
+  static String newId() {
+    final ts = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
+    final rand = (DateTime.now().microsecondsSinceEpoch % 46656)
+        .toRadixString(36)
+        .padLeft(3, '0');
+    return 'p_${ts}_$rand';
   }
 
   /// RLE 编码：["A1", 12, "B3", 5, ...]。

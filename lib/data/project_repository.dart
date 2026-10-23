@@ -41,6 +41,7 @@ class ProjectSummary {
 /// <文档>/PindouStudio/
 ///   projects/<id>.json      项目数据
 ///   thumbs/<id>.png         缩略图
+///   sources/<id>.<ext>      原图字节（随项目留存，重转参数用）
 /// ```
 /// 存储目录可通过 [storageRoot] 注入（测试用临时目录）。
 class ProjectRepository {
@@ -51,6 +52,7 @@ class ProjectRepository {
 
   Directory? _projectsDir;
   Directory? _thumbsDir;
+  Directory? _sourcesDir;
 
   Future<Directory> _ensureDirs() async {
     if (_projectsDir != null) {
@@ -60,6 +62,7 @@ class ProjectRepository {
         Directory(await _documentsPath()).childDir('PindouStudio');
     _projectsDir = root.childDir('projects')..createSync(recursive: true);
     _thumbsDir = root.childDir('thumbs')..createSync(recursive: true);
+    _sourcesDir = root.childDir('sources')..createSync(recursive: true);
     return _projectsDir!;
   }
 
@@ -71,6 +74,10 @@ class ProjectRepository {
 
   File _projectFile(String id) => File('${_projectsDir!.path}/$id.json');
   File _thumbFile(String id) => File('${_thumbsDir!.path}/$id.png');
+
+  /// 原图文件（ext 不含点；id/ext 需调用方保证合法）。
+  File _sourceFile(String id, String ext) =>
+      File('${_sourcesDir!.path}/$id.$ext');
 
   /// 列出全部项目（按更新时间降序）。
   Future<List<ProjectSummary>> listProjects() async {
@@ -108,22 +115,59 @@ class ProjectRepository {
     return SavedProject.tryParseJson(await file.readAsString());
   }
 
-  /// 保存项目（写入 JSON + 更新缩略图）。
-  Future<void> saveProject(SavedProject project, {Uint8List? thumbnailPng}) async {
+  /// 保存项目（写入 JSON + 更新缩略图 + 可选留存原图）。
+  ///
+  /// [sourceImageBytes] 非空时写入 `sources/<id>.<ext>` 并在 JSON 记录扩展名；
+  /// 为 null 且项目已有 sourceExt 时保留磁盘上的旧原图（不删除）。
+  Future<void> saveProject(
+    SavedProject project, {
+    Uint8List? thumbnailPng,
+    Uint8List? sourceImageBytes,
+  }) async {
     await _ensureDirs();
-    await _projectFile(project.id).writeAsString(project.toJsonString());
+    var saved = project;
+    if (sourceImageBytes != null) {
+      final ext = _normalizeExt(project.sourceExt);
+      if (ext != null) {
+        await _sourceFile(project.id, ext).writeAsBytes(
+          sourceImageBytes,
+          flush: true,
+        );
+      }
+    } else if (project.sourceExt == null) {
+      // 显式无原图（如加载旧项目后再保存）：清掉可能残留的旧原图记录，
+      // 但不动磁盘文件（无法确定扩展名）。
+      saved = project;
+    }
+    await _projectFile(saved.id).writeAsString(saved.toJsonString());
     if (thumbnailPng != null) {
-      await _thumbFile(project.id).writeAsBytes(thumbnailPng, flush: true);
+      await _thumbFile(saved.id).writeAsBytes(thumbnailPng, flush: true);
     }
   }
 
-  /// 删除项目（JSON + 缩略图）。
+  /// 读取项目原图字节；未留存或文件丢失返回 null。
+  Future<Uint8List?> loadSourceImage(SavedProject project) async {
+    await _ensureDirs();
+    final ext = project.sourceExt;
+    if (ext == null || ext.isEmpty) return null;
+    final file = _sourceFile(project.id, ext);
+    if (!file.existsSync()) return null;
+    return await file.readAsBytes();
+  }
+
+  /// 删除项目（JSON + 缩略图 + 原图）。
   Future<void> deleteProject(String id) async {
     await _ensureDirs();
+    final project = await loadProject(id);
     final file = _projectFile(id);
     if (file.existsSync()) await file.delete();
     final thumb = _thumbFile(id);
     if (thumb.existsSync()) await thumb.delete();
+    final ext = project?.sourceExt;
+    if (ext != null && ext.isNotEmpty) {
+      final source = _sourceFile(id, ext);
+      if (source.existsSync()) await source.delete();
+    }
   }
 
   /// 重命名（更新 JSON 内的 name 与 updatedAt）。
@@ -134,6 +178,55 @@ class ProjectRepository {
       ..name = newName
       ..updatedAt = DateTime.now();
     await _projectFile(id).writeAsString(project.toJsonString());
+  }
+
+  /// 复制项目（新 id，名称加后缀；缩略图与原图一并复制）。
+  /// 返回新项目 id；源项目不存在返回 null。
+  Future<String?> duplicateProject(String id) async {
+    await _ensureDirs();
+    final project = await loadProject(id);
+    if (project == null) return null;
+    final newId = SavedProject.newId();
+    final copy = SavedProject(
+      id: newId,
+      name: '${project.name} 副本',
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      width: project.width,
+      height: project.height,
+      cellCodes: List.of(project.cellCodes),
+      manualEdits: Map.of(project.manualEdits),
+      sourceFileName: project.sourceFileName,
+      sourceWidth: project.sourceWidth,
+      sourceHeight: project.sourceHeight,
+      sourceExt: project.sourceExt,
+      dither: project.dither,
+      brightness: project.brightness,
+      contrast: project.contrast,
+      colorLimit: project.colorLimit,
+      paletteId: project.paletteId,
+    );
+    await _projectFile(newId).writeAsString(copy.toJsonString());
+    final thumb = _thumbFile(id);
+    if (thumb.existsSync()) {
+      await thumb.copy(_thumbFile(newId).path);
+    }
+    final ext = project.sourceExt;
+    if (ext != null && ext.isNotEmpty) {
+      final source = _sourceFile(id, ext);
+      if (source.existsSync()) {
+        await source.copy(_sourceFile(newId, ext).path);
+      }
+    }
+    return newId;
+  }
+
+  /// 扩展名规范化：去点、小写、只允许字母数字（防路径注入）；非法返回 null。
+  static String? _normalizeExt(String? raw) {
+    if (raw == null) return null;
+    final ext = raw.toLowerCase().replaceAll('.', '').trim();
+    if (ext.isEmpty || !RegExp(r'^[a-z0-9]{1,5}$').hasMatch(ext)) return null;
+    return ext;
   }
 
   /// 读取缩略图文件；不存在返回 null。
