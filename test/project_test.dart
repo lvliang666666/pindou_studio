@@ -147,6 +147,110 @@ void main() {
       expect(png[0], 0x89);
       expect(png[1], 0x50);
     });
+
+    test('原图留存：保存写入 sources/，读取还原字节', () async {
+      final sourceBytes = Uint8List.fromList([1, 2, 3, 4, 5]);
+      final project = SavedProject.fromPattern(
+        id: 'p_src',
+        name: '带原图',
+        pattern: _makePattern(),
+        sourceExt: 'png',
+      );
+      await repo.saveProject(project, sourceImageBytes: sourceBytes);
+
+      final loaded = await repo.loadProject('p_src');
+      expect(loaded!.sourceExt, 'png');
+      final restored = await repo.loadSourceImage(loaded);
+      expect(restored, sourceBytes);
+    });
+
+    test('无原图项目：loadSourceImage 返回 null', () async {
+      final project = SavedProject.fromPattern(
+        id: 'p_nosrc',
+        name: '无原图',
+        pattern: _makePattern(),
+      );
+      await repo.saveProject(project);
+      final loaded = await repo.loadProject('p_nosrc');
+      expect(loaded!.sourceExt, isNull);
+      expect(await repo.loadSourceImage(loaded), isNull);
+    });
+
+    test('删除项目连带删除原图', () async {
+      final project = SavedProject.fromPattern(
+        id: 'p_del',
+        name: '待删',
+        pattern: _makePattern(),
+        sourceExt: 'jpg',
+      );
+      await repo.saveProject(
+        project,
+        sourceImageBytes: Uint8List.fromList([7, 7, 7]),
+      );
+      expect(await repo.loadSourceImage(project), isNotNull);
+
+      await repo.deleteProject('p_del');
+      expect(await repo.loadProject('p_del'), isNull);
+      // 原图文件已删：重新构造同 id 项目读取应返回 null（文件不存在）。
+      expect(
+        await repo.loadSourceImage(
+          SavedProject.fromPattern(
+            id: 'p_del',
+            name: 'x',
+            pattern: _makePattern(),
+            sourceExt: 'jpg',
+          ),
+        ),
+        isNull,
+      );
+    });
+
+    test('复制项目：新 id 独立，名称加副本后缀，原图缩略图跟随', () async {
+      final project = SavedProject.fromPattern(
+        id: 'p_orig',
+        name: '原件',
+        pattern: _makePattern(),
+        sourceExt: 'png',
+      );
+      await repo.saveProject(
+        project,
+        thumbnailPng: Uint8List.fromList([4, 4]),
+        sourceImageBytes: Uint8List.fromList([8, 8, 8]),
+      );
+
+      final newId = await repo.duplicateProject('p_orig');
+      expect(newId, isNotNull);
+      expect(newId, isNot('p_orig'));
+
+      final copy = await repo.loadProject(newId!);
+      expect(copy!.name, '原件 副本');
+      expect(copy.toPattern()!.width, 4);
+      expect(await repo.loadThumbnail(newId), isNotNull);
+      expect(await repo.loadSourceImage(copy), [8, 8, 8]);
+
+      // 原件不受影响。
+      expect(await repo.loadProject('p_orig'), isNotNull);
+    });
+
+    test('复制不存在的项目返回 null', () async {
+      expect(await repo.duplicateProject('p_missing'), isNull);
+    });
+
+    test('非法扩展名被拒绝（不写文件）', () async {
+      final project = SavedProject.fromPattern(
+        id: 'p_badext',
+        name: '坏扩展名',
+        pattern: _makePattern(),
+        sourceExt: '../evil',
+      );
+      await repo.saveProject(
+        project,
+        sourceImageBytes: Uint8List.fromList([1]),
+      );
+      // JSON 里保留了原始 ext，但磁盘上不应写出 sources/ 下的文件。
+      final sourcesDir = Directory('${tempDir.path}/sources');
+      expect(sourcesDir.listSync().whereType<File>(), isEmpty);
+    });
   });
 
   group('EditorState 项目保存/加载', () {
@@ -214,6 +318,62 @@ void main() {
       expect(state.pattern, isNull);
       expect(state.hasUnsavedChanges, isFalse);
       expect(state.gridWidthCtrl.text, '29');
+    });
+
+    test('loadImage 记录原图字节与扩展名，save 留存到仓库', () async {
+      final state = EditorState(repository: ProjectRepository(storageRoot: tempDir));
+      addTearDown(state.dispose);
+
+      // 构造 8x8 红色 PNG 字节。
+      final png = await ProjectRepository.renderThumbnail(_makePattern());
+      await state.loadImage(png, 'cat.png');
+      expect(state.pattern, isNotNull);
+
+      final id = await state.save(name: '带图项目');
+      final loaded = await state.repository.loadProject(id);
+      expect(loaded!.sourceExt, 'png');
+      expect(loaded.sourceFileName, 'cat.png');
+      final restored = await state.repository.loadSourceImage(loaded);
+      expect(restored, png);
+    });
+
+    test('loadProject 恢复留存的原图（预览与像素可用）', () async {
+      // 保存带原图的项目。
+      final state1 = EditorState(repository: ProjectRepository(storageRoot: tempDir));
+      addTearDown(state1.dispose);
+      final png = await ProjectRepository.renderThumbnail(_makePattern());
+      await state1.loadImage(png, 'dog.png');
+      final id = await state1.save(name: '原图恢复');
+
+      // 新状态加载：原图应异步恢复。
+      final state2 = EditorState(repository: ProjectRepository(storageRoot: tempDir));
+      addTearDown(state2.dispose);
+      final project = await state2.repository.loadProject(id);
+      await state2.loadProject(project!);
+
+      expect(state2.previewImage, isNotNull);
+      expect(state2.srcWidth, greaterThan(0));
+      expect(state2.srcHeight, greaterThan(0));
+      expect(state2.fileName, 'dog.png');
+    });
+
+    test('旧项目无原图：loadProject 正常打开，原图为空', () async {
+      // 手工构造无 sourceExt 的项目 JSON（模拟旧版本数据）。
+      final project = SavedProject.fromPattern(
+        id: 'p_legacy',
+        name: '旧项目',
+        pattern: _makePattern(),
+      );
+      await ProjectRepository(storageRoot: tempDir).saveProject(project);
+
+      final state = EditorState(repository: ProjectRepository(storageRoot: tempDir));
+      addTearDown(state.dispose);
+      final loaded = await state.repository.loadProject('p_legacy');
+      await state.loadProject(loaded!);
+
+      expect(state.pattern, isNotNull);
+      expect(state.previewImage, isNull);
+      expect(state.srcWidth, 0);
     });
   });
 }
