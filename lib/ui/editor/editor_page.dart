@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -124,6 +125,8 @@ class _EditorPageState extends State<EditorPage> {
     try {
       final bytes = await file.readAsBytes();
       await widget.state.loadImage(bytes, file.name);
+      // 留存导入历史（尽力而为，失败不影响导入）。
+      unawaited(widget.state.repository.recordImport(bytes, file.name));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -131,6 +134,62 @@ class _EditorPageState extends State<EditorPage> {
         );
       }
     }
+  }
+
+  /// 从最近导入历史加载图片。
+  Future<void> _loadFromHistory(ImportRecord record) async {
+    try {
+      final bytes = await record.file.readAsBytes();
+      await widget.state.loadImage(bytes, record.fileName);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('加载失败：$e')),
+      );
+    }
+  }
+
+  /// 最近导入菜单（参数区「导入图片」旁的下拉入口）。
+  Future<void> _showRecentImports() async {
+    final records = await widget.state.repository.listImports();
+    if (!mounted) return;
+    if (records.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('还没有导入记录')),
+      );
+      return;
+    }
+    final theme = Theme.of(context);
+    final picked = await showDialog<ImportRecord>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('最近导入'),
+        children: [
+          for (final r in records.take(8))
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(r),
+              child: ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: Text(r.fileName,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(_formatImportDate(r.importedAt),
+                    style: theme.textTheme.bodySmall),
+                dense: true,
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked != null) _loadFromHistory(picked);
+  }
+
+  static String _formatImportDate(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0) return '今天';
+    if (diff.inDays == 1) return '昨天';
+    if (diff.inDays < 30) return '${diff.inDays} 天前';
+    return '${dt.year}/${dt.month}/${dt.day}';
   }
 
   /// 侧面板当前显示内容（中屏/窄屏用）：参数 or 统计。
@@ -547,6 +606,12 @@ class _EditorPageState extends State<EditorPage> {
               onPressed: state.converting ? null : _pickImage,
               icon: const Icon(Icons.image),
               label: const Text('导入图片'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: state.converting ? null : _showRecentImports,
+              icon: const Icon(Icons.history, size: 18),
+              label: const Text('最近导入'),
             ),
             if (state.previewImage != null) ...[
               const SizedBox(height: 12),
@@ -1250,7 +1315,8 @@ class _ColorPickerDialog extends StatelessWidget {
 /// 侧面板内容类型。
 enum _SidePanel { params, stats }
 
-/// 打开项目对话框：列出已保存项目，选中后返回完整数据。
+/// 打开项目对话框：缩略图网格列出已保存项目，支持重命名/复制/删除。
+/// 选中项目返回完整数据（null = 取消）。
 class _OpenProjectDialog extends StatefulWidget {
   const _OpenProjectDialog({required this.repository});
 
@@ -1264,6 +1330,9 @@ class _OpenProjectDialogState extends State<_OpenProjectDialog> {
   List<ProjectSummary>? _projects;
   String? _error;
 
+  /// 缩略图缓存（id -> PNG 字节），列表加载后异步补齐。
+  final _thumbs = <String, Uint8List?>{};
+
   @override
   void initState() {
     super.initState();
@@ -1275,6 +1344,13 @@ class _OpenProjectDialogState extends State<_OpenProjectDialog> {
       final projects = await widget.repository.listProjects();
       if (!mounted) return;
       setState(() => _projects = projects);
+      for (final p in projects) {
+        if (p.hasThumbnail) {
+          final bytes = await widget.repository.loadThumbnail(p.id);
+          if (!mounted) return;
+          setState(() => _thumbs[p.id] = bytes);
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -1301,14 +1377,87 @@ class _OpenProjectDialogState extends State<_OpenProjectDialog> {
     }
   }
 
+  Future<void> _rename(ProjectSummary summary) async {
+    final controller = TextEditingController(text: summary.name);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重命名项目'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '项目名',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.of(context).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (newName == null || newName.trim().isEmpty || !mounted) return;
+    await widget.repository.renameProject(summary.id, newName.trim());
+    _load();
+  }
+
+  Future<void> _duplicate(ProjectSummary summary) async {
+    final newId = await widget.repository.duplicateProject(summary.id);
+    if (!mounted) return;
+    if (newId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('复制失败：项目不存在')),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已复制：${summary.name} 副本')),
+    );
+    _load();
+  }
+
+  Future<void> _delete(ProjectSummary summary) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除项目'),
+        content: Text('确定删除「${summary.name}」吗？此操作不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.repository.deleteProject(summary.id);
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
       title: const Text('打开项目'),
       content: SizedBox(
-        width: 420,
-        height: 380,
+        width: 560,
+        height: 480,
         child: _buildBody(theme),
       ),
       actions: [
@@ -1356,20 +1505,119 @@ class _OpenProjectDialogState extends State<_OpenProjectDialog> {
         ),
       );
     }
-    return ListView.builder(
+    return GridView.builder(
+      padding: const EdgeInsets.all(4),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 170,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 0.82,
+      ),
       itemCount: projects.length,
-      itemBuilder: (context, i) {
-        final s = projects[i];
-        return ListTile(
-          leading: const Icon(Icons.grid_on_outlined),
-          title: Text(s.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text(
-            '${s.width}x${s.height} · ${s.colorCount} 色 · ${_formatDate(s.updatedAt)}',
-            style: theme.textTheme.bodySmall,
-          ),
-          onTap: () => _open(s),
-        );
-      },
+      itemBuilder: (context, i) => _buildCard(theme, projects[i]),
+    );
+  }
+
+  Widget _buildCard(ThemeData theme, ProjectSummary s) {
+    final thumb = _thumbs[s.id];
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _open(s),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 缩略图区。
+            Expanded(
+              child: Container(
+                color: theme.colorScheme.surfaceContainerHighest,
+                alignment: Alignment.center,
+                child: thumb != null
+                    ? Image.memory(
+                        thumb,
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                      )
+                    : const Icon(Icons.grid_on_outlined, size: 32),
+              ),
+            ),
+            // 信息区。
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        Text(
+                          '${s.width}x${s.height} · ${s.colorCount}色 · ${_formatDate(s.updatedAt)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  // 操作菜单。
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, size: 20),
+                    onSelected: (v) {
+                      if (v == 'open') _open(s);
+                      if (v == 'rename') _rename(s);
+                      if (v == 'duplicate') _duplicate(s);
+                      if (v == 'delete') _delete(s);
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'open',
+                        child: ListTile(
+                          leading: Icon(Icons.open_in_new),
+                          title: Text('打开'),
+                          dense: true,
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'rename',
+                        child: ListTile(
+                          leading: Icon(Icons.edit_outlined),
+                          title: Text('重命名'),
+                          dense: true,
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'duplicate',
+                        child: ListTile(
+                          leading: Icon(Icons.copy_outlined),
+                          title: Text('复制'),
+                          dense: true,
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                          leading: Icon(Icons.delete_outline,
+                              color: theme.colorScheme.error),
+                          title: Text('删除',
+                              style:
+                                  TextStyle(color: theme.colorScheme.error)),
+                          dense: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

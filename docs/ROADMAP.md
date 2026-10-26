@@ -5,6 +5,43 @@
 > VERSIONING.md 的更新内容清单。
 > 维护规则见 `版本管理规范/iteration-workflow.md` 的「需求池」一节。
 
-<!-- 暂无条目。产生想法时按 templates/ROADMAP.md 的条目格式添加：
-     标题 + 状态 + 背景 + 方案要点 + 影响面 + 关联（可选）。
-     状态三种：已评估暂不排期 / 排期中（分支名） / 已完成 vX.Y.Z -->
+## 1. 图片与豆图仓库管理（导入图片可留存复用，豆图库可视化统一管理）
+
+**状态**：排期中（feat/library-management）（2026-10-23）
+
+### 背景
+
+- 导入的原图只存在内存（`EditorState._pixels`），保存项目时不落盘
+  （`SavedProject` 仅存 sourceFileName 展示用）。加载旧项目后原图已丢，
+  无法调整亮度/对比度/颜色数等参数重新转换——想微调只能重新找图重新导入。
+- 打开项目对话框是纯文字列表（图标+名称+尺寸色数），无缩略图预览，
+  图纸多了以后靠名字很难认出哪张是哪张。
+- 项目列表无删除/重命名/复制入口，误存或废弃项目只能去文件目录手动删 JSON。
+
+### 方案要点
+
+1. **原图随项目留存**：`SavedProject` 增加 `sourceImage` 字段（原图字节，
+   PNG/JPEG 原样存储，不重编码）；保存项目时把原图写入
+   `sources/<id>.<ext>`（与 JSON 分离，避免 JSON 膨胀），加载项目时恢复
+   `_pixels`/`previewImage`，参数调整/重新转换立即可用。旧项目无原图照常打开。
+2. **豆图库管理对话框升级**：打开项目对话框改为缩略图网格/列表双视图，
+   每项带缩略图（已有 thumbs/<id>.png 基础设施）、名称、尺寸、色数、更新时间；
+   每项操作菜单：打开 / 重命名 / 复制 / 删除（删除需确认）。
+3. **导入图片历史**：新增 `imports/<id>.<ext>` 目录，导入图片时自动留存副本；
+   参数区「导入图片」按钮旁加「最近导入」下拉，一键重选最近用过的图。
+
+### 影响面
+
+- `lib/data/project_model.dart`：SavedProject 增加 sourceImage 相关字段（扩展名/尺寸）
+- `lib/data/project_repository.dart`：sources/imports 目录管理、原图存取 API、
+  项目复制/重命名 API（连带缩略图与原图文件）
+- `lib/state/editor_state.dart`：save 时写原图、loadProject 时恢复原图
+- `lib/ui/editor/editor_page.dart`：打开项目对话框改造（缩略图+操作菜单）、
+  导入区「最近导入」入口
+- `test/project_test.dart`：原图留存/恢复、复制/重命名/删除联动测试
+
+### 关联
+
+- 依赖现有 thumbs/ 缩略图基础设施（已具备）
+- 「多图拼合」（用户已确认的后续方向）以本条目的图片留存为基础，
+  建议先做本条目

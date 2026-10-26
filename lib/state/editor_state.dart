@@ -47,6 +47,12 @@ class EditorState extends ChangeNotifier {
   int _srcHeight = 0;
   String? _fileName;
 
+  /// 原图文件字节（导入时的原始文件内容，保存项目时随项目留存）。
+  Uint8List? _sourceBytes;
+
+  /// 原图扩展名（不含点，如 'png'/'jpg'；保存项目时写入 JSON）。
+  String? _sourceExt;
+
   /// 转换结果。
   BeadPattern? pattern;
 
@@ -142,8 +148,19 @@ class EditorState extends ChangeNotifier {
     _srcWidth = decoded.width;
     _srcHeight = decoded.height;
     _fileName = fileName;
+    _sourceBytes = bytes;
+    _sourceExt = _extOf(fileName);
     previewImage = MemoryImage(bytes);
     await reconvert();
+  }
+
+  /// 从文件名提取规范化扩展名（不含点，小写）；无法识别返回 null。
+  static String? _extOf(String fileName) {
+    final dot = fileName.lastIndexOf('.');
+    if (dot < 0 || dot == fileName.length - 1) return null;
+    final ext = fileName.substring(dot + 1).toLowerCase().trim();
+    if (!RegExp(r'^[a-z0-9]{1,5}$').hasMatch(ext)) return null;
+    return ext;
   }
 
   /// 参数变化时调用（自动防抖重转）。
@@ -544,10 +561,12 @@ class EditorState extends ChangeNotifier {
 
   /// 保存当前项目。新项目自动生成 id；[name] 为空时用原文件名或默认名。
   /// 返回项目 id。
+  ///
+  /// 有原图时随项目留存原图字节（`sources/<id>.<ext>`），加载后可调参重转。
   Future<String> save({String? name}) async {
     final p = pattern;
     if (p == null) throw StateError('没有可保存的图纸');
-    final id = projectId ?? _newId();
+    final id = projectId ?? SavedProject.newId();
     final now = DateTime.now();
     final project = SavedProject.fromPattern(
       id: id,
@@ -558,6 +577,7 @@ class EditorState extends ChangeNotifier {
       sourceFileName: _fileName,
       sourceWidth: _srcWidth > 0 ? _srcWidth : null,
       sourceHeight: _srcHeight > 0 ? _srcHeight : null,
+      sourceExt: _sourceExt,
       dither: dither,
       brightness: brightness.round(),
       contrast: contrast.round(),
@@ -567,7 +587,12 @@ class EditorState extends ChangeNotifier {
       updatedAt: now,
     );
     final thumb = await ProjectRepository.renderThumbnail(p);
-    await repository.saveProject(project, thumbnailPng: thumb);
+    await repository.saveProject(
+      project,
+      thumbnailPng: thumb,
+      // 原图字节只在内存中有时写入（加载旧项目后无原图，保留磁盘旧文件）。
+      sourceImageBytes: _sourceBytes,
+    );
     projectId = id;
     projectName = project.name;
     createdAt ??= now;
@@ -577,6 +602,9 @@ class EditorState extends ChangeNotifier {
   }
 
   /// 从已保存项目恢复编辑器状态。
+  ///
+  /// 项目留存了原图（`sources/<id>.<ext>`）时一并恢复：预览图与原图像素
+  /// 可用，参数调整/重新转换立即可用。旧项目无原图照常打开（仅图纸编辑）。
   Future<void> loadProject(SavedProject project) async {
     // 先切到项目所用色卡（旧项目无记录时回退通用卡），
     // toPattern 的色号解析依赖当前色卡。
@@ -600,18 +628,31 @@ class EditorState extends ChangeNotifier {
     colorLimit = project.colorLimit;
     gridWidthCtrl.text = '${project.width}';
     gridHeightCtrl.text = '${project.height}';
-    // 已保存项目不含原图像素：重新转换不可用（参数调整需基于原图，
-    // 而原图未存储），清空原图信息避免误导。
-    _pixels = null;
-    _srcWidth = 0;
-    _srcHeight = 0;
     _fileName = project.sourceFileName;
-    previewImage = null;
+    _sourceExt = project.sourceExt;
     _undoStack.clear();
     _redoStack.clear();
     _currentStroke = null;
     _autoCodes.clear();
     hasUnsavedChanges = false;
+
+    // 恢复留存的原图（异步读盘 + 解码；失败不阻塞项目打开）。
+    _pixels = null;
+    _srcWidth = 0;
+    _srcHeight = 0;
+    _sourceBytes = null;
+    previewImage = null;
+    notifyListeners();
+    final bytes = await repository.loadSourceImage(project);
+    if (bytes == null || project.id != projectId) return;
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return;
+    _sourceBytes = bytes;
+    _pixels = Uint8List.fromList(
+        decoded.getBytes(order: img.ChannelOrder.rgba, alpha: 255));
+    _srcWidth = decoded.width;
+    _srcHeight = decoded.height;
+    previewImage = MemoryImage(bytes);
     notifyListeners();
   }
 
@@ -628,6 +669,8 @@ class EditorState extends ChangeNotifier {
     _srcWidth = 0;
     _srcHeight = 0;
     _fileName = null;
+    _sourceBytes = null;
+    _sourceExt = null;
     previewImage = null;
     dither = true;
     brightness = 0;
@@ -643,14 +686,6 @@ class EditorState extends ChangeNotifier {
     brushCode = null;
     hasUnsavedChanges = false;
     notifyListeners();
-  }
-
-  static String _newId() {
-    final ts = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
-    final rand = (DateTime.now().microsecondsSinceEpoch % 46656)
-        .toRadixString(36)
-        .padLeft(3, '0');
-    return 'p_${ts}_$rand';
   }
 
   @override
