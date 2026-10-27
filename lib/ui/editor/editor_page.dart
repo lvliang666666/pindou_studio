@@ -48,7 +48,6 @@ class _EditorPageState extends State<EditorPage> {
   final _brightnessDrag = ValueNotifier<double?>(null);
   final _contrastDrag = ValueNotifier<double?>(null);
   final _colorLimitDrag = ValueNotifier<double?>(null);
-  final _bgToleranceDrag = ValueNotifier<double?>(null);
 
   @override
   void initState() {
@@ -67,7 +66,6 @@ class _EditorPageState extends State<EditorPage> {
     _brightnessDrag.dispose();
     _contrastDrag.dispose();
     _colorLimitDrag.dispose();
-    _bgToleranceDrag.dispose();
     super.dispose();
   }
 
@@ -762,37 +760,6 @@ class _EditorPageState extends State<EditorPage> {
               ],
             ),
             const Divider(height: 32),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('抠背景（留空不放豆）'),
-              subtitle: const Text('自动检测纯色背景并置空',
-                  style: TextStyle(fontSize: 12)),
-              value: state.removeBackground,
-              onChanged: (v) => setState(() => state.setRemoveBackground(v)),
-            ),
-            if (state.removeBackground)
-              ValueListenableBuilder<double?>(
-                valueListenable: _bgToleranceDrag,
-                builder: (context, drag, _) => Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('背景容差 ${(drag ?? state.bgTolerance).round()}',
-                        style: Theme.of(context).textTheme.titleSmall),
-                    Slider(
-                      value: (drag ?? state.bgTolerance.toDouble()),
-                      min: 0,
-                      max: 128,
-                      divisions: 128,
-                      label: '${(drag ?? state.bgTolerance).round()}',
-                      onChanged: (v) => _bgToleranceDrag.value = v,
-                      onChangeEnd: (v) {
-                        _bgToleranceDrag.value = null;
-                        state.setBgTolerance(v.round());
-                      },
-                    ),
-                  ],
-                ),
-              ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('抖动（Floyd-Steinberg）'),

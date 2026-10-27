@@ -69,11 +69,6 @@ class EditorState extends ChangeNotifier {
   double contrast = 0;
   int colorLimit = 0; // 0 = 不限制
 
-  /// 自动抠背景：检测纯色背景并置为空格（不放豆）。
-  bool removeBackground = false;
-
-  /// 抠背景容差（0~128）：与背景色距离小于该值视为背景。
-  int bgTolerance = 32;
 
   /// 锁定宽高比：修改宽度时按原图比例自动计算高度（反之亦然）。
   bool lockRatio = true;
@@ -201,15 +196,6 @@ class EditorState extends ChangeNotifier {
     scheduleReconvert();
   }
 
-  void setRemoveBackground(bool v) {
-    removeBackground = v;
-    scheduleReconvert();
-  }
-
-  void setBgTolerance(int v) {
-    bgTolerance = v.clamp(0, 128);
-    scheduleReconvert();
-  }
 
   void setLockRatio(bool v) {
     lockRatio = v;
@@ -588,8 +574,6 @@ class EditorState extends ChangeNotifier {
           brightness: brightness.round(),
           contrast: contrast.round(),
           colorLimit: colorLimit,
-          removeBackground: removeBackground,
-          bgTolerance: bgTolerance,
         ),
       );
       // 参数变化后基准图已变，撤销/重做历史作废。
@@ -697,8 +681,6 @@ class EditorState extends ChangeNotifier {
     _sourceBytes = null;
     previewImage = null;
     _stitchRecipe = stitchRecipe;
-    removeBackground = false;
-    bgTolerance = 32;
     hasUnsavedChanges = true;
     notifyListeners();
   }
@@ -735,8 +717,6 @@ class EditorState extends ChangeNotifier {
       brightness: brightness.round(),
       contrast: contrast.round(),
       colorLimit: colorLimit,
-      removeBackground: removeBackground,
-      bgTolerance: bgTolerance,
       paletteId: paletteId,
       createdAt: createdAt,
       updatedAt: now,
@@ -781,8 +761,6 @@ class EditorState extends ChangeNotifier {
     brightness = project.brightness.toDouble();
     contrast = project.contrast.toDouble();
     colorLimit = project.colorLimit;
-    removeBackground = project.removeBackground;
-    bgTolerance = project.bgTolerance;
     gridWidthCtrl.text = '${project.width}';
     gridHeightCtrl.text = '${project.height}';
     _fileName = project.sourceFileName;
@@ -835,8 +813,6 @@ class EditorState extends ChangeNotifier {
     brightness = 0;
     contrast = 0;
     colorLimit = 0;
-    removeBackground = false;
-    bgTolerance = 32;
     BeadPalette.setActive('default');
     paletteId = 'default';
     gridWidthCtrl.text = '29';

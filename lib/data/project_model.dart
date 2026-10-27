@@ -29,8 +29,6 @@ class SavedProject {
     this.brightness = 0,
     this.contrast = 0,
     this.colorLimit = 0,
-    this.removeBackground = false,
-    this.bgTolerance = 32,
     this.paletteId = 'default',
   });
 
@@ -68,11 +66,6 @@ class SavedProject {
   final int contrast;
   final int colorLimit;
 
-  /// 自动抠背景开关（旧项目无此字段时回退 false）。
-  final bool removeBackground;
-
-  /// 抠背景容差（旧项目无此字段时回退 32）。
-  final int bgTolerance;
 
   /// 所用色卡 id（旧项目无此字段时回退 'default'）。
   final String paletteId;
@@ -91,8 +84,6 @@ class SavedProject {
     int brightness = 0,
     int contrast = 0,
     int colorLimit = 0,
-    bool removeBackground = false,
-    int bgTolerance = 32,
     String paletteId = 'default',
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -115,8 +106,6 @@ class SavedProject {
       brightness: brightness,
       contrast: contrast,
       colorLimit: colorLimit,
-      removeBackground: removeBackground,
-      bgTolerance: bgTolerance,
       paletteId: paletteId,
     );
   }
@@ -177,8 +166,6 @@ class SavedProject {
         'brightness': brightness,
         'contrast': contrast,
         'colorLimit': colorLimit,
-        if (removeBackground) 'removeBackground': removeBackground,
-        if (removeBackground) 'bgTolerance': bgTolerance,
         'paletteId': paletteId,
       };
 
@@ -208,8 +195,6 @@ class SavedProject {
       brightness: json['brightness'] as int? ?? 0,
       contrast: json['contrast'] as int? ?? 0,
       colorLimit: json['colorLimit'] as int? ?? 0,
-      removeBackground: json['removeBackground'] as bool? ?? false,
-      bgTolerance: json['bgTolerance'] as int? ?? 32,
       paletteId: json['paletteId'] as String? ?? 'default',
     );
   }
