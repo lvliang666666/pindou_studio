@@ -152,7 +152,10 @@ class _EditorPageState extends State<EditorPage> {
 
   /// 多图拼合：对话框内完成转换，结果装入编辑器（保留配方支持改颗粒度重拼）。
   Future<void> _stitchImages() async {
-    final result = await showStitchDialog(context);
+    final result = await showStitchDialog(
+      context,
+      boardSize: widget.settings.boardSize,
+    );
     if (result == null || !mounted) return;
     widget.state.loadPattern(
       result.$1.pattern,
@@ -434,6 +437,7 @@ class _EditorPageState extends State<EditorPage> {
             pattern: pattern,
             colors: canvasColors,
             showGrid: _showGrid,
+            boardSize: widget.settings.boardSize,
             brushCode: state.brushCode,
             onPaintCell: (x, y) => _paintCell(state, x, y),
             onEraseCell: (x, y) => state.eraseCell(x, y),
@@ -892,7 +896,9 @@ class _EditorPageState extends State<EditorPage> {
                       _statRow('图纸尺寸', '${pattern.width} x ${pattern.height}', context),
                       _statRow('总豆数', '${pattern.totalBeads}', context),
                       _statRow('颜色数', '${pattern.colorCount}', context),
-                      _statRow('底板数', '${pattern.boardCount} (29x29)', context),
+                      _statRow('底板数',
+                          '${pattern.boardCount(boardSize: widget.settings.boardSize)} (${widget.settings.boardSize}x${widget.settings.boardSize})',
+                          context),
                     ],
                   ),
                 ),
@@ -926,7 +932,9 @@ class _EditorPageState extends State<EditorPage> {
               ],
             ),
           ),
-          if (pattern != null && pattern.width > 29 || pattern != null && pattern.height > 29)
+          if (pattern != null &&
+              (pattern.width > widget.settings.boardSize ||
+                  pattern.height > widget.settings.boardSize))
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: OutlinedButton.icon(
@@ -934,7 +942,8 @@ class _EditorPageState extends State<EditorPage> {
                     ? null
                     : () => _exportBoardPngs(state.pattern!),
                 icon: const Icon(Icons.dashboard_customize),
-                label: Text('分板导出 PNG (${pattern.boardCount} 块)',
+                label: Text(
+                    '分板导出 PNG (${pattern.boardCount(boardSize: widget.settings.boardSize)} 块)',
                     style: const TextStyle(fontSize: 13)),
               ),
             ),
@@ -1091,7 +1100,8 @@ class _EditorPageState extends State<EditorPage> {
   // ---------- 导出 ----------
 
   Future<void> _exportPng(BeadPattern pattern) async {
-    final bytes = await ExportService.renderPatternPng(pattern);
+    final bytes = await ExportService.renderPatternPng(
+        pattern, boardSize: widget.settings.boardSize);
     final suggestedName = 'pindou_${pattern.width}x${pattern.height}.png';
     final location = await getSaveLocation(
       suggestedName: suggestedName,
@@ -1122,9 +1132,11 @@ class _EditorPageState extends State<EditorPage> {
     );
     if (directoryPath == null) return;
     try {
-      final boards = ExportService.splitByBoards(pattern);
+      final boards = ExportService.splitByBoards(pattern,
+          boardSize: widget.settings.boardSize);
       for (final (bx, by, sub) in boards) {
-        final bytes = await ExportService.renderPatternPng(sub);
+        final bytes = await ExportService.renderPatternPng(sub,
+            boardSize: widget.settings.boardSize);
         final name =
             'board_r${by + 1}_c${bx + 1}_${sub.width}x${sub.height}.png';
         final file = XFile.fromData(bytes, mimeType: 'image/png', name: name);
@@ -1179,7 +1191,8 @@ class _EditorPageState extends State<EditorPage> {
     try {
       await Printing.layoutPdf(
         onLayout: (format) =>
-            PrintService.buildPdf(pattern, projectName: name),
+            PrintService.buildPdf(pattern,
+                projectName: name, boardSize: widget.settings.boardSize),
         name: name,
         format: const PdfPageFormat(595, 842, marginAll: 0),
         usePrinterSettings: true,
@@ -1212,7 +1225,8 @@ class _EditorPageState extends State<EditorPage> {
     }
     try {
       final bytes =
-          await PrintService.buildPdf(pattern, projectName: name);
+          await PrintService.buildPdf(pattern,
+              projectName: name, boardSize: widget.settings.boardSize);
       final file = XFile.fromData(bytes,
           mimeType: 'application/pdf', name: suggestedName);
       await file.saveTo(path);

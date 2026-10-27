@@ -11,10 +11,13 @@ import '../core/stitcher.dart';
 ///
 /// 返回 (拼合结果, 拼合配方)（null = 取消）。转换在对话框内完成后随结果
 /// 返回，由调用方装入编辑器；配方保留后改「图纸尺寸」可按新颗粒度重拼。
-Future<(StitchResult, StitchRecipe)?> showStitchDialog(BuildContext context) {
+Future<(StitchResult, StitchRecipe)?> showStitchDialog(
+  BuildContext context, {
+  int boardSize = 29,
+}) {
   return showDialog<(StitchResult, StitchRecipe)>(
     context: context,
-    builder: (context) => const _StitchDialog(),
+    builder: (context) => _StitchDialog(boardSize: boardSize),
   );
 }
 
@@ -36,7 +39,10 @@ class _StitchImage {
 }
 
 class _StitchDialog extends StatefulWidget {
-  const _StitchDialog();
+  const _StitchDialog({required this.boardSize});
+
+  /// 底板尺寸（豆数）：预览的底板数按此计算。
+  final int boardSize;
 
   @override
   State<_StitchDialog> createState() => _StitchDialogState();
@@ -173,7 +179,7 @@ class _StitchDialogState extends State<_StitchDialog> {
               _images.isEmpty
                   ? '拼合后总尺寸：—'
                   : '拼合后总尺寸：$totalW x $totalH 豆'
-                    '（${((totalW + 28) ~/ 29) * ((totalH + 28) ~/ 29)} 块底板）',
+                    '（${((totalW + widget.boardSize - 1) ~/ widget.boardSize) * ((totalH + widget.boardSize - 1) ~/ widget.boardSize)} 块底板）',
               style: theme.textTheme.bodySmall,
             ),
             if (_error != null) ...[

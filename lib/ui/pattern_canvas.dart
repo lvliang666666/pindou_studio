@@ -16,6 +16,7 @@ class PatternCanvas extends StatefulWidget {
     required this.colors,
     this.showGrid = true,
     this.showRuler = true,
+    this.boardSize = 29,
     this.onCellTap,
     this.brushCode,
     this.onPaintCell,
@@ -34,6 +35,9 @@ class PatternCanvas extends StatefulWidget {
 
   /// 是否显示行号/列号标尺与底板分界线。
   final bool showRuler;
+
+  /// 底板尺寸（豆数）：分界虚线按此间距绘制。
+  final int boardSize;
 
   /// 点击格子回调（未启用画笔时），参数为格子坐标 (x, y)。
   final void Function(int x, int y)? onCellTap;
@@ -71,6 +75,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
   BeadPattern? _rasterPattern;
   bool _rasterShowGrid = true;
   bool _rasterShowRuler = true;
+  int _rasterBoardSize = 29;
   PindouCanvasColors? _rasterColors;
 
   /// 正在光栅化（避免重复提交）。
@@ -160,6 +165,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
         (p != _rasterPattern ||
             widget.showGrid != _rasterShowGrid ||
             widget.showRuler != _rasterShowRuler ||
+            widget.boardSize != _rasterBoardSize ||
             widget.colors != _rasterColors)) {
       _scheduleRasterizeAfterFrame();
     }
@@ -191,6 +197,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterPattern!.height == p.height &&
         _rasterShowGrid == widget.showGrid &&
         _rasterShowRuler == widget.showRuler &&
+        _rasterBoardSize == widget.boardSize &&
         _rasterColors == widget.colors;
     _pendingDirtyCells = null;
     try {
@@ -312,11 +319,11 @@ class _PatternCanvasState extends State<PatternCanvas> {
                 Offset(entry.value.$2, y), isMajor ? thick : thin);
           }
         }
-        // 29 格底板分界虚线：脏格子覆盖段同样需要补画（橙色虚线
+        // 底板分界虚线：脏格子覆盖段同样需要补画（橙色虚线
         // 1.5px 居中于格线，色块 bleed 盖掉自己侧 0.75px 后必须补回；
         // 覆盖段同样精确限制在色块区域内，不伸入完好区域）。
         if (widget.showRuler) {
-          const boardSize = 29;
+          final boardSize = widget.boardSize;
           final dashPaint = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5
@@ -355,6 +362,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
           pattern: p,
           showGrid: widget.showGrid,
           showRuler: widget.showRuler,
+          boardSize: widget.boardSize,
           cell: _baseCell,
           colors: widget.colors,
         ).paint(canvas, Size(w.toDouble(), h.toDouble()));
@@ -371,6 +379,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterPattern = p;
         _rasterShowGrid = widget.showGrid;
         _rasterShowRuler = widget.showRuler;
+        _rasterBoardSize = widget.boardSize;
         _rasterColors = widget.colors;
       });
       old?.dispose();
@@ -613,6 +622,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
                                 pattern: pattern,
                                 showGrid: widget.showGrid,
                                 showRuler: widget.showRuler,
+                                boardSize: widget.boardSize,
                                 cell: _baseCell,
                                 colors: widget.colors,
                               )
@@ -774,6 +784,7 @@ class _PatternPainter extends CustomPainter {
     required this.pattern,
     required this.showGrid,
     required this.showRuler,
+    required this.boardSize,
     required this.cell,
     required this.colors,
   });
@@ -781,6 +792,7 @@ class _PatternPainter extends CustomPainter {
   final BeadPattern pattern;
   final bool showGrid;
   final bool showRuler;
+  final int boardSize;
   final double cell;
   final PindouCanvasColors colors;
 
@@ -882,10 +894,10 @@ class _PatternPainter extends CustomPainter {
         ..color = colors.patternBorder,
     );
 
-    // 行号/列号标尺（每 5 格标注）与 29 格底板分界线。
+    // 行号/列号标尺（每 5 格标注）与底板分界线。
     if (showRuler && cell >= 10) {
       const rulerStep = 5;
-      const boardSize = 29;
+      final boardSize = this.boardSize;
       final labelStyle = TextStyle(
         color: colors.rulerText,
         fontSize: cell * 0.42,
@@ -946,6 +958,7 @@ class _PatternPainter extends CustomPainter {
     return oldDelegate.pattern != pattern ||
         oldDelegate.showGrid != showGrid ||
         oldDelegate.showRuler != showRuler ||
+        oldDelegate.boardSize != boardSize ||
         oldDelegate.cell != cell ||
         oldDelegate.colors != colors;
   }

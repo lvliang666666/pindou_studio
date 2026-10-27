@@ -21,12 +21,16 @@ class AppSettings extends ChangeNotifier {
 
   PindouTheme _theme = pindouThemeById('default');
   String _paletteId = 'default';
+  int _boardSize = 29;
 
   /// 当前主题。
   PindouTheme get theme => _theme;
 
   /// 当前色卡 id。
   String get paletteId => _paletteId;
+
+  /// 底板尺寸（正方形边长，豆数）。最小 29（兼容历史），常用 50。
+  int get boardSize => _boardSize;
 
   File? _settingsFile;
 
@@ -69,6 +73,13 @@ class AppSettings extends ChangeNotifier {
           changed = true;
         }
       }
+      final bs = json['boardSize'];
+      if (bs is int && bs >= 29 && bs <= 200) {
+        if (_boardSize != bs) {
+          _boardSize = bs;
+          changed = true;
+        }
+      }
       if (changed) notifyListeners();
     } catch (_) {
       // 坏 JSON / 无权限等：保持默认设置。
@@ -93,6 +104,16 @@ class AppSettings extends ChangeNotifier {
     await _persist();
   }
 
+  /// 更新底板尺寸：立即生效并异步落盘。
+  /// [size] 限制在 29~200（正方形边长，豆数）。
+  Future<void> setBoardSize(int size) async {
+    final s = size.clamp(29, 200);
+    if (_boardSize == s) return;
+    _boardSize = s;
+    notifyListeners();
+    await _persist();
+  }
+
   Future<void> _persist() async {
     try {
       final file = await _ensureFile();
@@ -100,6 +121,7 @@ class AppSettings extends ChangeNotifier {
         const JsonEncoder.withIndent('  ').convert({
           'themeId': _theme.id,
           'paletteId': _paletteId,
+          'boardSize': _boardSize,
         }),
       );
     } catch (_) {

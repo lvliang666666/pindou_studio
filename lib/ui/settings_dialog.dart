@@ -16,9 +16,17 @@ Future<void> showSettingsDialog(BuildContext context, AppSettings settings) {
 }
 
 class _SettingsDialog extends StatelessWidget {
-  const _SettingsDialog({required this.settings});
+  _SettingsDialog({required this.settings});
 
   final AppSettings settings;
+
+  /// 自定义底板尺寸输入框（对话框生命周期内共享）。
+  final _boardCtrl = TextEditingController();
+
+  static String? _boardError(int current) {
+    if (current < 29 || current > 200) return '需在 29 ~ 200 之间';
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,6 +92,58 @@ class _SettingsDialog extends StatelessWidget {
                         selected: settings.paletteId == set.id,
                         onSelected: (_) => settings.setPalette(set.id),
                       ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('底板尺寸（正方形，豆数）',
+                  style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              Text('统计/分板导出/打印按此尺寸分板；画布虚线同步',
+                  style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 8),
+              ListenableBuilder(
+                listenable: settings,
+                builder: (context, _) => Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final preset in const [29, 50, 58, 87])
+                      ChoiceChip(
+                        label: Text('$preset x $preset'),
+                        selected: settings.boardSize == preset,
+                        onSelected: (_) => settings.setBoardSize(preset),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListenableBuilder(
+                listenable: settings,
+                builder: (context, _) => Row(
+                  children: [
+                    SizedBox(
+                      width: 120,
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: '自定义',
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                          errorText: _boardError(settings.boardSize),
+                        ),
+                        controller: _boardCtrl,
+                        onSubmitted: (v) {
+                          final n = int.tryParse(v);
+                          if (n != null && n >= 29 && n <= 200) {
+                            settings.setBoardSize(n);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('29 ~ 200（最小 29 兼容历史）',
+                        style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),
