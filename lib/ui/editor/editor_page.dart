@@ -16,6 +16,7 @@ import '../export_service.dart';
 import '../pattern_canvas.dart';
 import '../print_service.dart';
 import '../settings_dialog.dart';
+import '../stitch_dialog.dart';
 
 /// 编辑器页面：参数区 + 图纸画布 + 统计导出区。
 ///
@@ -147,6 +148,13 @@ class _EditorPageState extends State<EditorPage> {
         SnackBar(content: Text('加载失败：$e')),
       );
     }
+  }
+
+  /// 多图拼合：对话框内完成转换，结果装入编辑器。
+  Future<void> _stitchImages() async {
+    final result = await showStitchDialog(context);
+    if (result == null || !mounted) return;
+    widget.state.loadPattern(result.pattern, name: '多图拼合');
   }
 
   /// 最近导入菜单（参数区「导入图片」旁的下拉入口）。
@@ -612,6 +620,12 @@ class _EditorPageState extends State<EditorPage> {
               onPressed: state.converting ? null : _showRecentImports,
               icon: const Icon(Icons.history, size: 18),
               label: const Text('最近导入'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: state.converting ? null : _stitchImages,
+              icon: const Icon(Icons.grid_view, size: 18),
+              label: const Text('多图拼合'),
             ),
             if (state.previewImage != null) ...[
               const SizedBox(height: 12),

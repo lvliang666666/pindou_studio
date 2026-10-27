@@ -557,6 +557,39 @@ class EditorState extends ChangeNotifier {
     );
   }
 
+  /// 装入一张现成图纸（多图拼合等外部生成结果），作为"无原图项目"打开。
+  ///
+  /// 与 loadImage 的区别：没有原图像素，参数调整/重新转换不可用
+  /// （与加载旧项目一致），但手动编辑/导出/打印/保存全链路可用。
+  void loadPattern(BeadPattern p, {String name = '多图拼合'}) {
+    _debounce?.cancel();
+    projectId = null;
+    projectName = name;
+    createdAt = null;
+    pattern = p;
+    manualEdits.clear();
+    _autoCodes.clear();
+    dither = true;
+    brightness = 0;
+    contrast = 0;
+    colorLimit = 0;
+    gridWidthCtrl.text = '${p.width}';
+    gridHeightCtrl.text = '${p.height}';
+    _fileName = null;
+    _sourceExt = null;
+    _undoStack.clear();
+    _redoStack.clear();
+    _currentStroke = null;
+    brushCode = null;
+    _pixels = null;
+    _srcWidth = 0;
+    _srcHeight = 0;
+    _sourceBytes = null;
+    previewImage = null;
+    hasUnsavedChanges = true;
+    notifyListeners();
+  }
+
   // ---------- 项目保存 / 加载 ----------
 
   /// 保存当前项目。新项目自动生成 id；[name] 为空时用原文件名或默认名。
