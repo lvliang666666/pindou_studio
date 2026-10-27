@@ -128,11 +128,15 @@ void main() {
       state.dispose();
     });
 
-    test('未编辑过的格子擦除无效果', () {
+    test('未编辑过的格子擦除 = 擦成空格（抠背景兜底）', () {
       final state = _makeState();
       state.eraseCell(3, 3);
+      // 新语义：右键擦除自动转换色的格子 → 变空格（清除残留豆）。
+      expect(state.pattern!.cellAt(3, 3), isNull);
+      expect(state.canUndo, isTrue);
+      // 撤销后恢复原豆。
+      state.undo();
       expect(state.pattern!.cellAt(3, 3)!.code, 'D1');
-      expect(state.canUndo, isFalse);
       state.dispose();
     });
   });

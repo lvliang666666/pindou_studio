@@ -309,11 +309,20 @@ class EditorState extends ChangeNotifier {
     return _applyCellEdit(x, y, color.code);
   }
 
-  /// 擦除：恢复该格为自动转换色。返回恢复后的颜色；无编辑记录时返回 null。
+  /// 擦除（画笔模式右键）：
+  /// - 格子有手动编辑时，恢复为自动转换色（撤销误涂）；
+  /// - 格子是自动转换色（无编辑记录）时，擦成空格（手动抠背景兜底，
+  ///   清除自动转换残留的边缘豆子）。
+  /// 返回恢复/应用后的颜色；擦成空格返回 null（画布通过对比格子
+  /// 前后内容感知变化，不依赖返回值）。
   BeadColor? eraseCell(int x, int y) {
     final auto = _autoCodes['$x,$y'];
-    if (auto == null) return null;
-    return _applyCellEdit(x, y, auto);
+    if (auto != null && auto.isNotEmpty) {
+      return _applyCellEdit(x, y, auto);
+    }
+    // 无手动编辑（或自动色本就是空格）：擦成空格。
+    eraseToEmpty(x, y);
+    return null;
   }
 
   /// 擦成空格（不放豆）：手动抠背景的兜底操作。
