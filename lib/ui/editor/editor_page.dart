@@ -150,11 +150,15 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
-  /// 多图拼合：对话框内完成转换，结果装入编辑器。
+  /// 多图拼合：对话框内完成转换，结果装入编辑器（保留配方支持改颗粒度重拼）。
   Future<void> _stitchImages() async {
     final result = await showStitchDialog(context);
     if (result == null || !mounted) return;
-    widget.state.loadPattern(result.pattern, name: '多图拼合');
+    widget.state.loadPattern(
+      result.$1.pattern,
+      name: '多图拼合',
+      stitchRecipe: result.$2,
+    );
   }
 
   /// 最近导入菜单（参数区「导入图片」旁的下拉入口）。
@@ -670,8 +674,18 @@ class _EditorPageState extends State<EditorPage> {
               },
             ),
             const SizedBox(height: 16),
-            Text('图纸尺寸（豆数）',
-                style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              state.isStitched ? '单张颗粒度（豆）' : '图纸尺寸（豆数）',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            if (state.isStitched)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '拼合项目：宽/高填单张最长边，确认后重新拼合',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
             const SizedBox(height: 8),
             Row(
               children: [

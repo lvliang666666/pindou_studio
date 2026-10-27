@@ -79,6 +79,18 @@ class StitchResult {
 class BeadStitcher {
   BeadStitcher._();
 
+  /// 按新颗粒度重新拼合（保留来源图与每行张数，只改单张最长边）。
+  /// 转换参数沿用首次拼合时的抖动设置。
+  static StitchResult restitch(
+    StitchRecipe recipe, {
+    required int perImageMaxSize,
+  }) {
+    return stitch(
+      images: recipe.images,
+      options: recipe.options.copyWith(perImageMaxSize: perImageMaxSize),
+    );
+  }
+
   /// 将多张 RGBA 像素图拼合为一张图纸。
   ///
   /// [images] 为 (RGBA 像素, 宽, 高) 列表，至少 1 张。
@@ -210,4 +222,18 @@ class BeadStitcher {
       ]),
     );
   }
+}
+
+/// 多图拼合配方：来源图 + 拼合布局参数。
+///
+/// 拼合结果装入编辑器时保留，用户改「图纸尺寸」确认后按新颗粒度
+/// 重新拼合（颗粒度可调，不用回对话框重来）。
+class StitchRecipe {
+  const StitchRecipe({required this.images, required this.options});
+
+  /// 来源图（RGBA 像素, 宽, 高）。
+  final List<(Uint8List, int, int)> images;
+
+  /// 首次拼合的参数（columns/dither 等沿用，perImageMaxSize 可变）。
+  final StitchOptions options;
 }

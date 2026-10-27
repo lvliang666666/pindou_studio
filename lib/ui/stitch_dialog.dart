@@ -9,10 +9,10 @@ import '../core/stitcher.dart';
 
 /// 多图拼合对话框：多选图片 → 设置拼合参数 → 生成拼合图纸。
 ///
-/// 返回 [StitchResult]（null = 取消）。转换在对话框内完成后随结果返回，
-/// 由调用方装入编辑器。
-Future<StitchResult?> showStitchDialog(BuildContext context) {
-  return showDialog<StitchResult>(
+/// 返回 (拼合结果, 拼合配方)（null = 取消）。转换在对话框内完成后随结果
+/// 返回，由调用方装入编辑器；配方保留后改「图纸尺寸」可按新颗粒度重拼。
+Future<(StitchResult, StitchRecipe)?> showStitchDialog(BuildContext context) {
+  return showDialog<(StitchResult, StitchRecipe)>(
     context: context,
     builder: (context) => const _StitchDialog(),
   );
@@ -139,7 +139,7 @@ class _StitchDialogState extends State<_StitchDialog> {
                 ),
               ),
             const SizedBox(height: 12),
-            Text('单张最长边：${_maxSize.round()} 豆',
+            Text('单张颗粒度：${_maxSize.round()} 豆',
                 style: theme.textTheme.titleSmall),
             Slider(
               value: _maxSize,
@@ -149,6 +149,8 @@ class _StitchDialogState extends State<_StitchDialog> {
               label: '${_maxSize.round()}',
               onChanged: _working ? null : (v) => setState(() => _maxSize = v),
             ),
+            Text('值越大颗粒越细、豆数越多；生成后仍可在参数区改图纸尺寸重新拼合',
+                style: theme.textTheme.bodySmall),
             Text('每行张数：${_columns.round()}',
                 style: theme.textTheme.titleSmall),
             Slider(
@@ -271,6 +273,11 @@ class _StitchDialogState extends State<_StitchDialog> {
       _error = null;
     });
     try {
+      final options = StitchOptions(
+        perImageMaxSize: _maxSize.round(),
+        columns: _columns.round(),
+        dither: _dither,
+      );
       // 转换放 isolate，避免多张大图卡 UI。
       final result = await compute(
         _stitchSync,
@@ -278,15 +285,17 @@ class _StitchDialogState extends State<_StitchDialog> {
           images: [
             for (final im in _images) (im.pixels, im.width, im.height),
           ],
-          options: StitchOptions(
-            perImageMaxSize: _maxSize.round(),
-            columns: _columns.round(),
-            dither: _dither,
-          ),
+          options: options,
         ),
       );
       if (!mounted) return;
-      Navigator.of(context).pop(result);
+      // 随结果带回拼合配方：编辑器里改图纸尺寸可按新颗粒度重新拼合。
+      Navigator.of(context).pop((
+        result,
+        StitchRecipe(images: [
+          for (final im in _images) (im.pixels, im.width, im.height),
+        ], options: options),
+      ));
     } catch (e) {
       if (!mounted) return;
       setState(() {

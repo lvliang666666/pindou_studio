@@ -2,8 +2,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pindou_studio/core/converter.dart';
-import 'package:pindou_studio/core/palette.dart';
 import 'package:pindou_studio/core/stitcher.dart';
 import 'package:pindou_studio/state/editor_state.dart';
 import 'package:pindou_studio/theme/theme_controller.dart';
@@ -33,7 +31,7 @@ void main() {
   });
 
   testWidgets('拼合对话框：打开后显示参数控件，取消关闭', (tester) async {
-    StitchResult? result;
+    (StitchResult, StitchRecipe)? result;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -56,7 +54,7 @@ void main() {
 
     expect(find.text('多图拼合'), findsOneWidget);
     expect(find.text('选择图片（可多选）'), findsOneWidget);
-    expect(find.text('单张最长边：29 豆'), findsOneWidget);
+    expect(find.text('单张颗粒度：29 豆'), findsOneWidget);
     expect(find.text('每行张数：2'), findsOneWidget);
     expect(find.text('拼合后总尺寸：—'), findsOneWidget);
 
@@ -131,5 +129,60 @@ void main() {
     // 撤销恢复。
     state.undo();
     expect(state.manualEdits.isEmpty, isTrue);
+  });
+
+  test('拼合项目改颗粒度：confirmGridSize 触发重新拼合', () async {
+    // 纯状态操作，无需 widget 树；用真实异步等防抖与 isolate 完成。
+    final state = EditorState();
+    addTearDown(state.dispose);
+
+    // 装入拼合结果（带配方）：两张 10x10 图，颗粒度 10 → 总 20x10。
+    final recipe = StitchRecipe(
+      images: [
+        (solidPixels(10, 10, 255, 0, 0), 10, 10),
+        (solidPixels(10, 10, 0, 0, 255), 10, 10),
+      ],
+      options: const StitchOptions(perImageMaxSize: 10, columns: 2),
+    );
+    state.loadPattern(
+      BeadStitcher.stitch(images: recipe.images, options: recipe.options)
+          .pattern,
+      name: '多图拼合',
+      stitchRecipe: recipe,
+    );
+    expect(state.pattern!.width, 20);
+    expect(state.isStitched, isTrue);
+
+    // 改「单张颗粒度」为 5，确认 → 重新拼合为 10x5。
+    state.gridWidthCtrl.text = '5';
+    state.gridHeightCtrl.text = '5';
+    state.confirmGridSize();
+    // 防抖 150ms + isolate 转换，留足余量。
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+
+    expect(state.pattern!.width, 10); // 5 x 2 列
+    expect(state.pattern!.height, 5);
+    expect(state.gridWidthCtrl.text, '10');
+    expect(state.gridHeightCtrl.text, '5');
+    expect(state.hasUnsavedChanges, isTrue);
+  });
+
+  test('非拼合项目 confirmGridSize 不触发重拼（无原图时无操作）', () async {
+    final state = EditorState();
+    addTearDown(state.dispose);
+
+    // 无配方装入（旧路径）：改尺寸确认不应崩溃、不改图纸。
+    final result = BeadStitcher.stitch(
+      images: [(solidPixels(10, 10, 255, 0, 0), 10, 10)],
+      options: const StitchOptions(perImageMaxSize: 29, columns: 1),
+    );
+    state.loadPattern(result.pattern);
+    expect(state.isStitched, isFalse);
+
+    state.gridWidthCtrl.text = '50';
+    state.confirmGridSize();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    // 无原图无配方：图纸保持不变。
+    expect(state.pattern!.width, 10);
   });
 }
