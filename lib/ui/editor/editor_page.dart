@@ -679,10 +679,23 @@ class _EditorPageState extends State<EditorPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              state.isStitched ? '单张颗粒度（豆）' : '图纸尺寸（豆数）',
+              state.isBoardMode
+                  ? '一板多图（${widget.settings.boardSize} x ${widget.settings.boardSize}）'
+                  : state.isStitched
+                      ? '单张颗粒度（豆）'
+                      : '图纸尺寸（豆数）',
               style: Theme.of(context).textTheme.titleSmall,
             ),
-            if (state.isStitched)
+            if (state.isBoardMode)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '总尺寸固定为底板，子图自动分布；'
+                  '底板尺寸在设置页修改，点「确认尺寸并生成」重拼',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              )
+            else if (state.isStitched)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(

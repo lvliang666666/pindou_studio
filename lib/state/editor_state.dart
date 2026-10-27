@@ -227,6 +227,12 @@ class EditorState extends ChangeNotifier {
     _debounce = Timer(const Duration(milliseconds: 150), () async {
       final recipe = _stitchRecipe;
       if (recipe != null) {
+        if (recipe.boardMode) {
+          // 一板多图：总尺寸固定为底板，颗粒度由布局决定，
+          // 尺寸确认无意义——直接按原参数重拼（刷新用）。
+          await _restitch(recipe, perImageMaxSize: recipe.boardSize);
+          return;
+        }
         final gw = int.tryParse(gridWidthCtrl.text) ?? 0;
         final gh = int.tryParse(gridHeightCtrl.text) ?? 0;
         final maxSize = gw >= 1 || gh >= 1 ? math.max(gw, gh) : 0;
@@ -691,6 +697,9 @@ class EditorState extends ChangeNotifier {
 
   /// 当前是否为拼合项目（参数区提示用）。
   bool get isStitched => _stitchRecipe != null;
+
+  /// 当前是否为一板多图项目（板模式颗粒度不可调）。
+  bool get isBoardMode => _stitchRecipe?.boardMode ?? false;
 
   // ---------- 项目保存 / 加载 ----------
 
