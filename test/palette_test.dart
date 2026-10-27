@@ -109,7 +109,7 @@ void main() {
         options: const ConvertOptions(gridWidth: 4, gridHeight: 4, dither: false),
       );
       expect(pattern.colorCount, 1);
-      expect(pattern.cells.first.code, 'A4');
+      expect(pattern.cells.first?.code, 'A4');
     });
 
     test('通用卡下同图映射到通用色号', () {
@@ -127,7 +127,7 @@ void main() {
         srcHeight: 8,
         options: const ConvertOptions(gridWidth: 4, gridHeight: 4, dither: false),
       );
-      expect(pattern.cells.first.code, 'F2');
+      expect(pattern.cells.first?.code, 'F2');
     });
   });
 

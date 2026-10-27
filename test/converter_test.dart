@@ -78,7 +78,7 @@ void main() {
         options: const ConvertOptions(gridWidth: 10, gridHeight: 10, dither: false),
       );
       expect(pattern.colorCount, 1);
-      expect(pattern.cells.every((c) => c.code == 'D1'), isTrue);
+      expect(pattern.cells.every((c) => c?.code == 'D1'), isTrue);
       expect(pattern.counts.single.count, 100);
     });
 
@@ -92,10 +92,10 @@ void main() {
       // 左半应为红色系，右半应为蓝色系。
       for (int y = 0; y < 4; y++) {
         for (int x = 0; x < 5; x++) {
-          expect(pattern.cellAt(x, y).group, '红色');
+          expect(pattern.cellAt(x, y)!.group, '红色');
         }
         for (int x = 5; x < 10; x++) {
-          expect(pattern.cellAt(x, y).group, '蓝色');
+          expect(pattern.cellAt(x, y)!.group, '蓝色');
         }
       }
     });
@@ -111,7 +111,7 @@ void main() {
         options: const ConvertOptions(gridWidth: 5, gridHeight: 5, dither: false),
       );
       expect(noDither.colorCount, 1);
-      expect(noDither.cells.first.code, 'E1');
+      expect(noDither.cells.first?.code, 'E1');
     });
 
     test('抖动开启时纯色图仍应基本保持原色', () {
@@ -124,7 +124,7 @@ void main() {
         options: const ConvertOptions(gridWidth: 5, gridHeight: 5, dither: true),
       );
       expect(dithered.colorCount, 1);
-      expect(dithered.cells.first.code, 'E1');
+      expect(dithered.cells.first?.code, 'E1');
     });
 
     test('渐变图抖动后颜色种类不少于无抖动', () {
@@ -198,7 +198,7 @@ void main() {
       double spread(BeadPattern p) {
         double minL = 255, maxL = 0;
         for (final c in p.cells) {
-          final l = 0.299 * c.red + 0.587 * c.green + 0.114 * c.blue;
+          final l = 0.299 * c!.red + 0.587 * c.green + 0.114 * c.blue;
           if (l < minL) minL = l;
           if (l > maxL) maxL = l;
         }

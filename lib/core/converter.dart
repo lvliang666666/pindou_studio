@@ -21,6 +21,8 @@ class ConvertOptions {
     this.brightness = 0,
     this.contrast = 0,
     this.colorLimit = 0,
+    this.removeBackground = false,
+    this.bgTolerance = 32,
   });
 
   /// 目标网格宽度（豆子列数）。
@@ -42,6 +44,12 @@ class ConvertOptions {
   /// 0 表示不限制。实际拼豆时颜色种类越少越省事。
   final int colorLimit;
 
+  /// 自动抠背景：检测纯色背景（边缘采样）并置为空格（不放豆）。
+  final bool removeBackground;
+
+  /// 抠背景容差（0~128）：与背景色的加权距离小于该值的像素视为背景。
+  final int bgTolerance;
+
   ConvertOptions copyWith({
     int? gridWidth,
     int? gridHeight,
@@ -49,6 +57,8 @@ class ConvertOptions {
     int? brightness,
     int? contrast,
     int? colorLimit,
+    bool? removeBackground,
+    int? bgTolerance,
   }) {
     return ConvertOptions(
       gridWidth: gridWidth ?? this.gridWidth,
@@ -57,11 +67,16 @@ class ConvertOptions {
       brightness: brightness ?? this.brightness,
       contrast: contrast ?? this.contrast,
       colorLimit: colorLimit ?? this.colorLimit,
+      removeBackground: removeBackground ?? this.removeBackground,
+      bgTolerance: bgTolerance ?? this.bgTolerance,
     );
   }
 }
 
 /// 转换结果：一张拼豆图纸。
+///
+/// 空格语义：cells 元素为 null 表示该格不放豆（底板留空）。
+/// 抠背景/透明像素/手动擦除都会产生空格；counts/totalBeads 只统计实豆。
 class BeadPattern {
   const BeadPattern({
     required this.width,
@@ -77,13 +92,23 @@ class BeadPattern {
   final int height;
 
   /// 每格对应的拼豆颜色，按行优先排列，长度 = width * height。
-  final List<BeadColor> cells;
+  /// null = 空格（不放豆，底板留空）。
+  final List<BeadColor?> cells;
 
-  /// 各颜色用量（豆数），按数量降序。
+  /// 各颜色用量（豆数），按数量降序。不含空格。
   final List<BeadCount> counts;
 
-  /// 总豆数。
-  int get totalBeads => width * height;
+  /// 总豆数（不含空格）。
+  int get totalBeads => counts.fold(0, (s, bc) => s + bc.count);
+
+  /// 空格数量。
+  int get emptyCells {
+    var n = 0;
+    for (final c in cells) {
+      if (c == null) n++;
+    }
+    return n;
+  }
 
   /// 使用的颜色种类数。
   int get colorCount => counts.length;
@@ -93,8 +118,8 @@ class BeadPattern {
     return ((width + 28) ~/ 29) * ((height + 28) ~/ 29);
   }
 
-  /// 获取 (x, y) 处的颜色。
-  BeadColor cellAt(int x, int y) => cells[y * width + x];
+  /// 获取 (x, y) 处的颜色；空格返回 null。
+  BeadColor? cellAt(int x, int y) => cells[y * width + x];
 }
 
 /// 单种颜色的用量统计。
@@ -126,10 +151,17 @@ class BeadConverter {
         pixels, options.brightness, options.contrast);
     }
 
+    // 1.5 自动抠背景：纯色背景（边缘采样主色）置为全透明。
+    // 在源分辨率上做，降采样的预乘 alpha 平均自然把"背景占比高"的
+    // 格子 alpha 压低，与图片自带透明通道走同一条路。
+    if (options.removeBackground) {
+      src = _removeBackground(src, srcWidth, srcHeight, options.bgTolerance);
+    }
+
     // 2. 面积平均降采样。
     final down = _downsample(src, srcWidth, srcHeight, gw, gh);
 
-    // 3. 量化（可选抖动）。
+    // 3. 量化（可选抖动）。alpha 低于阈值的格子输出空格（null）。
     final cells = options.dither
         ? _quantizeDither(down, gw, gh)
         : _quantize(down, gw, gh);
@@ -140,6 +172,83 @@ class BeadConverter {
         : cells;
 
     return _buildPattern(limited, gw, gh);
+  }
+
+  /// 抠背景容差对应的 alpha 阈值：格子平均 alpha 低于该值视为空格。
+  /// 降采样后格子可能部分透明（主体边缘），alpha < 128 按空格处理。
+  static const int emptyAlphaThreshold = 128;
+
+  /// 自动抠背景：采样图片四角与四边中点，取出现最多的颜色为背景色，
+  /// 与背景色加权距离小于 [tolerance] 的像素 alpha 置 0。
+  ///
+  /// 只处理"纯色背景"图：背景色必须至少覆盖两条完整边（采样点投票），
+  /// 否则视为无纯色背景、原图返回（避免误抠主体）。
+  static Uint8List _removeBackground(
+    Uint8List pixels,
+    int w,
+    int h,
+    int tolerance,
+  ) {
+    // ---- 1. 边缘采样：四角 + 四边中点，共 8 个采样点 ----
+    final samples = <(int, int, int)>[];
+    void sample(int x, int y) {
+      final idx = (y * w + x) * 4;
+      samples.add((pixels[idx], pixels[idx + 1], pixels[idx + 2]));
+    }
+
+    sample(0, 0);
+    sample(w - 1, 0);
+    sample(0, h - 1);
+    sample(w - 1, h - 1);
+    sample(w ~/ 2, 0);
+    sample(w ~/ 2, h - 1);
+    sample(0, h ~/ 2);
+    sample(w - 1, h ~/ 2);
+
+    // ---- 2. 投票找主色：容差内互相归并，取最大簇 ----
+    // 簇代表取簇内第一个样本；距离用与量化一致的加权欧氏距离。
+    final clusters = <(int, int, int), int>{};
+    for (final s in samples) {
+      var matched = false;
+      for (final key in clusters.keys.toList()) {
+        if (_colorDistance(s, key) <= tolerance * tolerance * 9) {
+          clusters[key] = clusters[key]! + 1;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) clusters[s] = 1;
+    }
+    (int, int, int)? bg;
+    var best = 0;
+    for (final e in clusters.entries) {
+      if (e.value > best) {
+        best = e.value;
+        bg = e.key;
+      }
+    }
+    // 少于 3 个采样点同色：不是纯色背景，不抠。
+    if (bg == null || best < 3) return pixels;
+
+    // ---- 3. 背景色置透明 ----
+    final out = Uint8List.fromList(pixels);
+    final tol2 = tolerance * tolerance * 9;
+    for (int i = 0; i < out.length; i += 4) {
+      final d = _colorDistance(
+        (out[i], out[i + 1], out[i + 2]),
+        bg,
+      );
+      if (d <= tol2) {
+        out[i + 3] = 0;
+      }
+    }
+    return out;
+  }
+
+  /// 加权颜色距离平方（与量化权重一致：2r²+4g²+3b²）。
+  static int _colorDistance((int, int, int) a, (int, int, int) b) {
+    final dr = a.$1 - b.$1, dg = a.$2 - b.$2, db = a.$3 - b.$3;
+    return 2 * dr * dr + 4 * dg * dg + 3 * db * db;
   }
 
   /// 亮度/对比度调整。
@@ -221,17 +330,23 @@ class BeadConverter {
     return out;
   }
 
-  /// 最近色量化（无抖动）。
-  static List<BeadColor> _quantize(Uint8List pixels, int w, int h) {
-    final out = List<BeadColor>.filled(w * h, BeadPalette.colors.first);
+  /// 最近色量化（无抖动）。alpha 低于阈值的格子输出空格（null）。
+  static List<BeadColor?> _quantize(Uint8List pixels, int w, int h) {
+    final out = List<BeadColor?>.filled(w * h, BeadPalette.colors.first);
     for (int i = 0, p = 0; i < out.length; i++, p += 4) {
-      out[i] = BeadPalette.nearest(pixels[p], pixels[p + 1], pixels[p + 2]);
+      if (pixels[p + 3] < emptyAlphaThreshold) {
+        out[i] = null;
+      } else {
+        out[i] = BeadPalette.nearest(pixels[p], pixels[p + 1], pixels[p + 2]);
+      }
     }
     return out;
   }
 
   /// Floyd-Steinberg 抖动量化。
-  static List<BeadColor> _quantizeDither(Uint8List pixels, int w, int h) {
+  /// 空格（alpha 低于阈值）不参与误差扩散：不向邻居传播误差、
+  /// 不接收邻居误差（背景格子保持干净，不被主体误差污染）。
+  static List<BeadColor?> _quantizeDither(Uint8List pixels, int w, int h) {
     // 工作在浮点缓冲上传播误差。
     final buf = Float32List(w * h * 3);
     for (int i = 0, p = 0, q = 0; i < w * h; i++, p += 4, q += 3) {
@@ -239,20 +354,31 @@ class BeadConverter {
       buf[q + 1] = pixels[p + 1].toDouble();
       buf[q + 2] = pixels[p + 2].toDouble();
     }
-    final out = List<BeadColor>.filled(w * h, BeadPalette.colors.first);
+    // 空格掩码：降采样后 alpha 低于阈值的格子。
+    final isEmpty = List<bool>.filled(w * h, false);
+    for (int i = 0, p = 3; i < w * h; i++, p += 4) {
+      isEmpty[i] = pixels[p] < emptyAlphaThreshold;
+    }
+    final out = List<BeadColor?>.filled(w * h, BeadPalette.colors.first);
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
-        final q = (y * w + x) * 3;
+        final idx = y * w + x;
+        if (isEmpty[idx]) {
+          out[idx] = null;
+          continue; // 空格：不量化、不扩散误差。
+        }
+        final q = idx * 3;
         final r = buf[q].clamp(0, 255);
         final g = buf[q + 1].clamp(0, 255);
         final b = buf[q + 2].clamp(0, 255);
         final bead = BeadPalette.nearest(r.round(), g.round(), b.round());
-        out[y * w + x] = bead;
+        out[idx] = bead;
 
         // 误差扩散。
         final er = r - bead.red, eg = g - bead.green, eb = b - bead.blue;
         void diffuse(int nx, int ny, double factor) {
           if (nx < 0 || nx >= w || ny < 0 || ny >= h) return;
+          if (isEmpty[ny * w + nx]) return; // 空格不接收误差。
           final nq = (ny * w + nx) * 3;
           buf[nq] += er * factor;
           buf[nq + 1] += eg * factor;
@@ -269,14 +395,16 @@ class BeadConverter {
   }
 
   /// 限制颜色数量：保留用量最多的 N 色，其余格子替换为最接近的保留色。
-  static List<BeadColor> _limitColors(
-    List<BeadColor> cells,
+  /// 空格（null）原样保留。
+  static List<BeadColor?> _limitColors(
+    List<BeadColor?> cells,
     int w,
     int h,
     int limit,
   ) {
     final counts = <BeadColor, int>{};
     for (final c in cells) {
+      if (c == null) continue;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     if (counts.length <= limit) return cells;
@@ -288,7 +416,10 @@ class BeadConverter {
 
     return [
       for (final c in cells)
-        kept.contains(c) ? c : _nearestAmong(kept, c.red, c.green, c.blue),
+        if (c == null)
+          null
+        else
+          kept.contains(c) ? c : _nearestAmong(kept, c.red, c.green, c.blue),
     ];
   }
 
@@ -306,10 +437,11 @@ class BeadConverter {
     return best;
   }
 
-  /// 统计用量并生成图纸对象。
-  static BeadPattern _buildPattern(List<BeadColor> cells, int w, int h) {
+  /// 统计用量并生成图纸对象。空格（null）不计入 counts。
+  static BeadPattern _buildPattern(List<BeadColor?> cells, int w, int h) {
     final counts = <BeadColor, int>{};
     for (final c in cells) {
+      if (c == null) continue;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     final sorted = counts.entries.toList()

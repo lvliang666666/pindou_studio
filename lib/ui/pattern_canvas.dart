@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -781,9 +782,31 @@ class _PatternPainter extends CustomPainter {
 
     for (int y = y0; y < y1; y++) {
       // 同色连续格子合并为一个矩形，减少 drawRect 调用。
+      // 空格（null）单独处理：画棋盘格纹理表示"不放豆"。
       int runStart = x0;
       BeadColor? runBead;
+      bool runEmpty = false;
       void flushRun(int endX) {
+        if (runEmpty) {
+          // 空格：棋盘格（8px 半格）浅灰纹理，直观表示底板留空。
+          const sq = 8.0;
+          final checker = Paint()..color = colors.emptyCell;
+          for (int yy = 0; yy < (cell / sq).ceil(); yy++) {
+            for (int xx = 0; xx < (endX - runStart) * cell / sq; xx++) {
+              if ((xx + yy) % 2 == 0) continue;
+              final px = runStart * cell + xx * sq;
+              final py = y * cell + yy * sq;
+              canvas.drawRect(
+                Rect.fromLTWH(px, py,
+                    math.min(sq, (endX - runStart) * cell - px + runStart * cell - runStart * cell + sq)
+                        .clamp(0.0, sq),
+                    math.min(sq, cell - py + y * cell).clamp(0.0, sq)),
+                checker,
+              );
+            }
+          }
+          return;
+        }
         if (runBead == null) return;
         fillPaint.color = Color(runBead.argb);
         canvas.drawRect(
@@ -794,10 +817,12 @@ class _PatternPainter extends CustomPainter {
 
       for (int x = x0; x < x1; x++) {
         final bead = pattern.cellAt(x, y);
-        if (bead != runBead) {
+        final isEmpty = bead == null;
+        if (isEmpty != runEmpty || (!isEmpty && bead != runBead)) {
           flushRun(x);
           runStart = x;
-          runBead = bead;
+          runBead = isEmpty ? null : bead;
+          runEmpty = isEmpty;
         }
       }
       flushRun(x1);

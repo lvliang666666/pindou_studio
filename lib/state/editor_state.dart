@@ -69,6 +69,12 @@ class EditorState extends ChangeNotifier {
   double contrast = 0;
   int colorLimit = 0; // 0 = 不限制
 
+  /// 自动抠背景：检测纯色背景并置为空格（不放豆）。
+  bool removeBackground = false;
+
+  /// 抠背景容差（0~128）：与背景色距离小于该值视为背景。
+  int bgTolerance = 32;
+
   /// 锁定宽高比：修改宽度时按原图比例自动计算高度（反之亦然）。
   bool lockRatio = true;
 
@@ -93,12 +99,14 @@ class EditorState extends ChangeNotifier {
   }
 
   /// 把当前 pattern 的色号重映射到当前色卡（项目加载/色卡切换用）。
+  /// 空格（null）原样保留。
   void _remapPatternToActivePalette() {
     final p = pattern;
     if (p == null) return;
     final byCode = BeadPalette.byCode;
     final cells = [
-      for (final c in p.cells) byCode[c.code] ?? byCode.values.first,
+      for (final c in p.cells)
+        c == null ? null : (byCode[c.code] ?? byCode.values.first),
     ];
     pattern = _rebuildCounts(cells, p.width, p.height);
   }
@@ -190,6 +198,16 @@ class EditorState extends ChangeNotifier {
 
   void setColorLimit(int v) {
     colorLimit = v;
+    scheduleReconvert();
+  }
+
+  void setRemoveBackground(bool v) {
+    removeBackground = v;
+    scheduleReconvert();
+  }
+
+  void setBgTolerance(int v) {
+    bgTolerance = v.clamp(0, 128);
     scheduleReconvert();
   }
 
@@ -298,23 +316,35 @@ class EditorState extends ChangeNotifier {
     return _applyCellEdit(x, y, auto);
   }
 
+  /// 擦成空格（不放豆）：手动抠背景的兜底操作。
+  /// 返回 null（空格无颜色对象）；实际应用结果通过 pattern 更新体现。
+  BeadColor? eraseToEmpty(int x, int y) {
+    return _applyCellEdit(x, y, emptyCellCode);
+  }
+
   /// 应用单格编辑，返回实际写入的颜色；无变化时返回 null。
+  /// [code] 为空字符串时表示擦成空格（不放豆）。
   BeadColor? _applyCellEdit(int x, int y, String code) {
     final p = pattern;
     if (p == null) return null;
-    final bead = BeadPalette.byCode[code];
-    if (bead == null) return null;
+    final BeadColor? bead;
+    if (code.isEmpty) {
+      bead = null; // 空格
+    } else {
+      bead = BeadPalette.byCode[code];
+      if (bead == null) return null;
+    }
     if (x < 0 || x >= p.width || y < 0 || y >= p.height) return null;
     final idx = y * p.width + x;
     // "当前值"判断：笔画中用可变副本（pattern.cells 是笔画开始时的
     // 旧内容——同一笔画内"涂走再涂回/擦回原色"时，旧列表恰好等于
     // 目标色，用它判断会把真实编辑误判为无变化而跳过）。
     final current = _currentStroke != null ? _mutableCells![idx] : p.cells[idx];
-    if (current.code == code) return null;
+    if (current?.code == code) return null;
 
     final key = '$x,$y';
-    final oldCode = current.code;
-    // 首次编辑该格时记录其自动转换色。
+    final oldCode = current?.code ?? '';
+    // 首次编辑该格时记录其自动转换色（空格记空串）。
     if (!manualEdits.containsKey(key) && !_autoCodes.containsKey(key)) {
       _autoCodes[key] = oldCode;
     }
@@ -334,8 +364,8 @@ class EditorState extends ChangeNotifier {
       // pattern.cells 仍是笔画开始时的旧内容，用它减计数会算错）。
       final prevBead = _mutableCells![idx];
       _mutableCells![idx] = bead;
-      _bumpCount(prevBead, -1);
-      _bumpCount(bead, 1);
+      if (prevBead != null) _bumpCount(prevBead, -1);
+      if (bead != null) _bumpCount(bead, 1);
       // 同一笔画内重复涂同一格：合并为一条记录。
       final i = stroke.edits.indexWhere((e) => e.x == x && e.y == y);
       if (i >= 0) {
@@ -346,7 +376,7 @@ class EditorState extends ChangeNotifier {
       notifyListeners();
     } else {
       // ===== 单格点击：完整路径（拷贝 + 重统计，可撤销一步） =====
-      final newCells = List<BeadColor>.of(p.cells);
+      final newCells = List<BeadColor?>.of(p.cells);
       newCells[idx] = bead;
       pattern = _rebuildCounts(newCells, p.width, p.height);
       _pushUndo(_Stroke()..edits.add(_CellEdit(x, y, oldCode, code)));
@@ -355,8 +385,13 @@ class EditorState extends ChangeNotifier {
     return bead;
   }
 
+  /// 擦成空格（抠背景手动兜底）：该格不放豆。返回 null 表示已应用
+  /// （与 paintCell 返回 BeadColor? 的语义一致：null = 无变化或空格）。
+  /// 画布叠加层需要区分"无变化"与"擦成空格"，用哨兵值 [emptyCellMarker]。
+  static const String emptyCellCode = '';
+
   /// 笔画期间的可变格子列表（与 pattern.cells 同内容）。
-  List<BeadColor>? _mutableCells;
+  List<BeadColor?>? _mutableCells;
 
   /// 笔画期间的可变计数表（颜色 -> 数量）。
   Map<BeadColor, int>? _mutableCounts;
@@ -385,7 +420,7 @@ class EditorState extends ChangeNotifier {
     final p = pattern;
     if (p != null) {
       // cells/counts 均不可变（List.unmodifiable），复制可变副本供笔画快速写入。
-      _mutableCells = List<BeadColor>.of(p.cells);
+      _mutableCells = List<BeadColor?>.of(p.cells);
       // 按 code 累加（BeadColor 已按 code 判等）：万一历史数据里
       // 同色出现多条，这里合并数量而不是覆盖，避免丢数量。
       _mutableCounts = <BeadColor, int>{};
@@ -418,7 +453,7 @@ class EditorState extends ChangeNotifier {
 
   /// 用增量维护的计数表重建 pattern（按数量降序）。
   static BeadPattern _rebuildFromCounts(
-    List<BeadColor> cells,
+    List<BeadColor?> cells,
     int width,
     int height,
     Map<BeadColor, int> counts,
@@ -462,15 +497,20 @@ class EditorState extends ChangeNotifier {
   void _applyStroke(_Stroke stroke, {required bool useNewCode}) {
     final p = pattern;
     if (p == null) return;
-    final cells = List<BeadColor>.of(p.cells);
+    final cells = List<BeadColor?>.of(p.cells);
     var changed = false;
     for (final e in stroke.edits) {
       final code = useNewCode ? e.newCode : e.oldCode;
-      final bead = BeadPalette.byCode[code];
-      if (bead == null) continue;
+      final BeadColor? bead;
+      if (code.isEmpty) {
+        bead = null; // 空格
+      } else {
+        bead = BeadPalette.byCode[code];
+        if (bead == null) continue;
+      }
       if (e.x < 0 || e.x >= p.width || e.y < 0 || e.y >= p.height) continue;
       final idx = e.y * p.width + e.x;
-      if (cells[idx].code == code) continue;
+      if (cells[idx]?.code == code) continue;
       cells[idx] = bead;
       changed = true;
 
@@ -494,12 +534,13 @@ class EditorState extends ChangeNotifier {
   }
 
   static BeadPattern _rebuildCounts(
-    List<BeadColor> cells,
+    List<BeadColor?> cells,
     int width,
     int height,
   ) {
     final counts = <BeadColor, int>{};
     for (final c in cells) {
+      if (c == null) continue;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     final sorted = counts.entries.toList()
@@ -537,6 +578,8 @@ class EditorState extends ChangeNotifier {
           brightness: brightness.round(),
           contrast: contrast.round(),
           colorLimit: colorLimit,
+          removeBackground: removeBackground,
+          bgTolerance: bgTolerance,
         ),
       );
       // 参数变化后基准图已变，撤销/重做历史作废。
@@ -544,25 +587,31 @@ class EditorState extends ChangeNotifier {
       _redoStack.clear();
       _currentStroke = null;
       // 重新转换后应用仍有效的手动编辑（坐标在范围内才保留）。
+      // 空格编辑（code 为空串）同样保留。
       if (manualEdits.isNotEmpty) {
-        final cells = List<BeadColor>.of(result.cells);
+        final cells = List<BeadColor?>.of(result.cells);
         final validEdits = <String, String>{};
         manualEdits.forEach((key, code) {
           final parts = key.split(',');
           final ex = int.parse(parts[0]);
           final ey = int.parse(parts[1]);
           if (ex < result.width && ey < result.height) {
-            final bead = BeadPalette.byCode[code];
-            if (bead != null) {
-              cells[ey * result.width + ex] = bead;
+            if (code.isEmpty) {
+              cells[ey * result.width + ex] = null;
               validEdits[key] = code;
+            } else {
+              final bead = BeadPalette.byCode[code];
+              if (bead != null) {
+                cells[ey * result.width + ex] = bead;
+                validEdits[key] = code;
+              }
             }
           }
         });
         manualEdits
           ..clear()
           ..addAll(validEdits);
-        // 重建自动色表：仅保留仍处于编辑状态的格子。
+        // 重建自动色表：仅保留仍处于编辑状态的格子（空格记空串）。
         _autoCodes
           ..clear()
           ..addAll({
@@ -570,7 +619,7 @@ class EditorState extends ChangeNotifier {
               key: result.cells[
                       int.parse(key.split(',')[1]) * result.width +
                           int.parse(key.split(',')[0])]
-                  .code,
+                  ?.code ?? '',
           });
         pattern = _rebuildCounts(cells, result.width, result.height);
       } else {
@@ -638,6 +687,8 @@ class EditorState extends ChangeNotifier {
     _sourceBytes = null;
     previewImage = null;
     _stitchRecipe = stitchRecipe;
+    removeBackground = false;
+    bgTolerance = 32;
     hasUnsavedChanges = true;
     notifyListeners();
   }
@@ -674,6 +725,8 @@ class EditorState extends ChangeNotifier {
       brightness: brightness.round(),
       contrast: contrast.round(),
       colorLimit: colorLimit,
+      removeBackground: removeBackground,
+      bgTolerance: bgTolerance,
       paletteId: paletteId,
       createdAt: createdAt,
       updatedAt: now,
@@ -718,6 +771,8 @@ class EditorState extends ChangeNotifier {
     brightness = project.brightness.toDouble();
     contrast = project.contrast.toDouble();
     colorLimit = project.colorLimit;
+    removeBackground = project.removeBackground;
+    bgTolerance = project.bgTolerance;
     gridWidthCtrl.text = '${project.width}';
     gridHeightCtrl.text = '${project.height}';
     _fileName = project.sourceFileName;
@@ -770,6 +825,8 @@ class EditorState extends ChangeNotifier {
     brightness = 0;
     contrast = 0;
     colorLimit = 0;
+    removeBackground = false;
+    bgTolerance = 32;
     BeadPalette.setActive('default');
     paletteId = 'default';
     gridWidthCtrl.text = '29';

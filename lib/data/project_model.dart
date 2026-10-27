@@ -29,6 +29,8 @@ class SavedProject {
     this.brightness = 0,
     this.contrast = 0,
     this.colorLimit = 0,
+    this.removeBackground = false,
+    this.bgTolerance = 32,
     this.paletteId = 'default',
   });
 
@@ -66,10 +68,16 @@ class SavedProject {
   final int contrast;
   final int colorLimit;
 
+  /// 自动抠背景开关（旧项目无此字段时回退 false）。
+  final bool removeBackground;
+
+  /// 抠背景容差（旧项目无此字段时回退 32）。
+  final int bgTolerance;
+
   /// 所用色卡 id（旧项目无此字段时回退 'default'）。
   final String paletteId;
 
-  /// 从图纸构建项目。
+  /// 从图纸构建项目。空格（null 格）编码为空字符串色号。
   factory SavedProject.fromPattern({
     required String id,
     required String name,
@@ -83,6 +91,8 @@ class SavedProject {
     int brightness = 0,
     int contrast = 0,
     int colorLimit = 0,
+    bool removeBackground = false,
+    int bgTolerance = 32,
     String paletteId = 'default',
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -95,7 +105,7 @@ class SavedProject {
       updatedAt: updatedAt ?? now,
       width: pattern.width,
       height: pattern.height,
-      cellCodes: [for (final c in pattern.cells) c.code],
+      cellCodes: [for (final c in pattern.cells) c?.code ?? ''],
       manualEdits: Map.of(manualEdits),
       sourceFileName: sourceFileName,
       sourceWidth: sourceWidth,
@@ -105,21 +115,29 @@ class SavedProject {
       brightness: brightness,
       contrast: contrast,
       colorLimit: colorLimit,
+      removeBackground: removeBackground,
+      bgTolerance: bgTolerance,
       paletteId: paletteId,
     );
   }
 
   /// 还原为图纸（色号无效的格子跳过，返回 null 表示数据损坏）。
+  /// 空字符串色号 = 空格（不放豆）。
   BeadPattern? toPattern() {
     if (cellCodes.length != width * height) return null;
-    final cells = <BeadColor>[];
+    final cells = <BeadColor?>[];
     for (final code in cellCodes) {
+      if (code.isEmpty) {
+        cells.add(null);
+        continue;
+      }
       final bead = BeadPalette.byCode[code];
       if (bead == null) return null;
       cells.add(bead);
     }
     final counts = <BeadColor, int>{};
     for (final c in cells) {
+      if (c == null) continue;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     final sorted = counts.entries.toList()
@@ -159,6 +177,8 @@ class SavedProject {
         'brightness': brightness,
         'contrast': contrast,
         'colorLimit': colorLimit,
+        if (removeBackground) 'removeBackground': removeBackground,
+        if (removeBackground) 'bgTolerance': bgTolerance,
         'paletteId': paletteId,
       };
 
@@ -188,6 +208,8 @@ class SavedProject {
       brightness: json['brightness'] as int? ?? 0,
       contrast: json['contrast'] as int? ?? 0,
       colorLimit: json['colorLimit'] as int? ?? 0,
+      removeBackground: json['removeBackground'] as bool? ?? false,
+      bgTolerance: json['bgTolerance'] as int? ?? 32,
       paletteId: json['paletteId'] as String? ?? 'default',
     );
   }

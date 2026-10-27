@@ -52,7 +52,7 @@ void main() {
       expect(pattern2.width, pattern.width);
       expect(pattern2.height, pattern.height);
       for (int i = 0; i < pattern.cells.length; i++) {
-        expect(pattern2.cells[i].code, pattern.cells[i].code);
+        expect(pattern2.cells[i]?.code, pattern.cells[i]?.code);
       }
       expect(pattern2.counts.length, pattern.counts.length);
     });
@@ -334,7 +334,7 @@ void main() {
       expect(state2.projectId, id);
       expect(state2.projectName, '加载测试');
       expect(state2.pattern!.width, 4);
-      expect(state2.pattern!.cellAt(2, 2).code, 'A1');
+      expect(state2.pattern!.cellAt(2, 2)!.code, 'A1');
       expect(state2.manualEdits['2,2'], 'A1');
       expect(state2.hasUnsavedChanges, isFalse);
     });

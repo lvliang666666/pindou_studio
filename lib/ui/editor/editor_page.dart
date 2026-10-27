@@ -48,6 +48,7 @@ class _EditorPageState extends State<EditorPage> {
   final _brightnessDrag = ValueNotifier<double?>(null);
   final _contrastDrag = ValueNotifier<double?>(null);
   final _colorLimitDrag = ValueNotifier<double?>(null);
+  final _bgToleranceDrag = ValueNotifier<double?>(null);
 
   @override
   void initState() {
@@ -66,6 +67,7 @@ class _EditorPageState extends State<EditorPage> {
     _brightnessDrag.dispose();
     _contrastDrag.dispose();
     _colorLimitDrag.dispose();
+    _bgToleranceDrag.dispose();
     super.dispose();
   }
 
@@ -762,6 +764,37 @@ class _EditorPageState extends State<EditorPage> {
             const Divider(height: 32),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              title: const Text('抠背景（留空不放豆）'),
+              subtitle: const Text('自动检测纯色背景并置空',
+                  style: TextStyle(fontSize: 12)),
+              value: state.removeBackground,
+              onChanged: (v) => setState(() => state.setRemoveBackground(v)),
+            ),
+            if (state.removeBackground)
+              ValueListenableBuilder<double?>(
+                valueListenable: _bgToleranceDrag,
+                builder: (context, drag, _) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('背景容差 ${(drag ?? state.bgTolerance).round()}',
+                        style: Theme.of(context).textTheme.titleSmall),
+                    Slider(
+                      value: (drag ?? state.bgTolerance.toDouble()),
+                      min: 0,
+                      max: 128,
+                      divisions: 128,
+                      label: '${(drag ?? state.bgTolerance).round()}',
+                      onChanged: (v) => _bgToleranceDrag.value = v,
+                      onChangeEnd: (v) {
+                        _bgToleranceDrag.value = null;
+                        state.setBgTolerance(v.round());
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               title: const Text('抖动（Floyd-Steinberg）'),
               subtitle: const Text('渐变过渡更自然', style: TextStyle(fontSize: 12)),
               value: state.dither,
@@ -1059,20 +1092,31 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   /// 弹出选色面板：已用颜色优先，其余按色系分组展示。
+  /// 返回空串 = 擦成空格（不放豆）；null = 取消。
   Future<void> _showColorPicker(EditorState state, int x, int y) async {
     final pattern = state.pattern;
     if (pattern == null) return;
     final current = pattern.cellAt(x, y);
+    final currentDesc = current == null
+        ? '空格（不放豆）'
+        : '${current.code} ${current.name}';
 
-    final selected = await showDialog<BeadColor>(
+    final selected = await showDialog<Object>(
       context: context,
       builder: (context) => _ColorPickerDialog(
-        title: '替换 ($x, $y) 颜色，当前：${current.code} ${current.name}',
+        title: '替换 ($x, $y) 颜色，当前：$currentDesc',
         usedColors: [for (final bc in pattern.counts) bc.color],
-        currentCode: current.code,
+        currentCode: current?.code ?? '',
+        allowEmpty: true,
       ),
     );
-    if (selected != null) {
+    if (selected == null || !mounted) return;
+    if (selected is String && selected.isEmpty) {
+      // 擦成空格。
+      state.eraseToEmpty(x, y);
+      return;
+    }
+    if (selected is BeadColor) {
       state.editCell(x, y, selected);
     }
   }
@@ -1221,16 +1265,19 @@ class _EditorPageState extends State<EditorPage> {
 
 
 /// 选色对话框：已用颜色 + 全色卡（按色系分组）。
+/// [allowEmpty] 时顶部提供「擦成空格」选项（返回空字符串）。
 class _ColorPickerDialog extends StatelessWidget {
   const _ColorPickerDialog({
     required this.title,
     required this.usedColors,
     required this.currentCode,
+    this.allowEmpty = false,
   });
 
   final String title;
   final List<BeadColor> usedColors;
   final String currentCode;
+  final bool allowEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -1265,6 +1312,15 @@ class _ColorPickerDialog extends StatelessWidget {
               Expanded(
                 child: ListView(
                   children: [
+                    if (allowEmpty && currentCode.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).pop(''),
+                          icon: const Icon(Icons.grid_off, size: 18),
+                          label: const Text('擦成空格（不放豆）'),
+                        ),
+                      ),
                     _section(context, '当前图纸使用的颜色', usedColors),
                     for (final entry in unusedGroups.entries)
                       _section(context, entry.key, entry.value),
