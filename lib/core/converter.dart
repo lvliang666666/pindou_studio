@@ -3,10 +3,13 @@
 /// 纯 Dart 实现，无 UI 依赖，便于单元测试。
 /// 处理流程：
 /// 1. 亮度/对比度调整（可选）
-/// 2. 面积平均降采样到目标网格尺寸
-/// 3. 颜色量化：逐像素匹配最近拼豆色（可选 Floyd-Steinberg 抖动）
+/// 2. 自动抠背景（可选）：flood fill 从边缘种子扩散，边缘检测
+///    （Sobel 梯度）保护主体边界，只抠与边缘连通的背景区域
+/// 3. 面积平均降采样到目标网格尺寸
+/// 4. 颜色量化：逐像素匹配最近拼豆色（可选 Floyd-Steinberg 抖动）
 library;
 
+import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -44,10 +47,10 @@ class ConvertOptions {
   /// 0 表示不限制。实际拼豆时颜色种类越少越省事。
   final int colorLimit;
 
-  /// 自动抠背景：检测纯色背景（边缘采样）并置为空格（不放豆）。
+  /// 自动抠背景：flood fill 从边缘扩散抠掉与边缘连通的背景区域。
   final bool removeBackground;
 
-  /// 抠背景容差（0~128）：与背景色的加权距离小于该值的像素视为背景。
+  /// 抠背景容差（0~128）：与种子背景色的加权距离小于该值的像素视为背景。
   final int bgTolerance;
 
   ConvertOptions copyWith({
@@ -151,9 +154,10 @@ class BeadConverter {
         pixels, options.brightness, options.contrast);
     }
 
-    // 1.5 自动抠背景：纯色背景（边缘采样主色）置为全透明。
-    // 在源分辨率上做，降采样的预乘 alpha 平均自然把"背景占比高"的
-    // 格子 alpha 压低，与图片自带透明通道走同一条路。
+    // 1.5 自动抠背景：flood fill 从边缘种子扩散，只抠与边缘连通的
+    // 背景区域（Sobel 边缘检测保护主体边界）。在源分辨率上做，
+    // 降采样的预乘 alpha 平均自然把"背景占比高"的格子 alpha 压低，
+    // 与图片自带透明通道走同一条路。
     if (options.removeBackground) {
       src = _removeBackground(src, srcWidth, srcHeight, options.bgTolerance);
     }
@@ -178,71 +182,218 @@ class BeadConverter {
   /// 降采样后格子可能部分透明（主体边缘），alpha < 128 按空格处理。
   static const int emptyAlphaThreshold = 128;
 
-  /// 自动抠背景：采样图片四角与四边中点，取出现最多的颜色为背景色，
-  /// 与背景色加权距离小于 [tolerance] 的像素 alpha 置 0。
+  /// 自动抠背景：flood fill（种子填充）+ 边缘保护。
   ///
-  /// 只处理"纯色背景"图：背景色必须至少覆盖两条完整边（采样点投票），
-  /// 否则视为无纯色背景、原图返回（避免误抠主体）。
+  /// 算法（比"全局颜色匹配"精细，能处理背景有轻微渐变/阴影的情况）：
+  /// 1. Sobel 边缘检测：梯度大的像素（主体轮廓）视为屏障，flood fill
+  ///    不越过它——即使主体颜色与背景接近，轮廓线也能挡住扩散。
+  /// 2. 种子点：四角 + 四边中点共 8 个。每个种子各自代表"这里应该是
+  ///    背景"；种子颜色即该区域的背景基准色。
+  /// 3. BFS 扩散：从种子出发，相邻像素与**当前区域背景色**（种子色）
+  ///    距离小于容差、且不是边缘像素时并入背景。区域背景色随扩散
+  ///    缓慢更新（滑动平均），适应背景渐变。
+  /// 4. 只有与边缘连通的背景被抠掉；主体内部的同色区域（如白脸里的
+  ///    白色高光）不受影响——这是与全局颜色匹配的本质区别。
+  ///
+  /// [tolerance] 0~128：与背景色的加权距离阈值（内部放大到 0~255 尺度）。
   static Uint8List _removeBackground(
     Uint8List pixels,
     int w,
     int h,
     int tolerance,
   ) {
-    // ---- 1. 边缘采样：四角 + 四边中点，共 8 个采样点 ----
-    final samples = <(int, int, int)>[];
-    void sample(int x, int y) {
-      final idx = (y * w + x) * 4;
-      samples.add((pixels[idx], pixels[idx + 1], pixels[idx + 2]));
+    if (w < 3 || h < 3) return pixels;
+    final n = w * h;
+
+    // ---- 1. Sobel 边缘检测：梯度幅值 ----
+    final edge = _sobelMagnitude(pixels, w, h);
+    // 边缘阈值：梯度幅值 > 该值的像素不参与扩散（屏障）。
+    // 容差越大，边缘阈值越宽松（用户想要更激进的抠图时容忍越过弱边）。
+    final edgeThreshold = 96.0 + tolerance * 1.2;
+
+    // 无主体守卫：整图布满中等梯度（全幅渐变/纹理图，任何位置都有
+    // 可见变化）时没有可辨识的主体边界，flood fill 会吞掉整张图，
+    // 抠图无意义——原图返回（用户得到完整图纸而不是全空图纸）。
+    // 用"弱边缘密度"判定：梯度 > 12 的像素占比超过 60% 视为无主体。
+    // （低对比主体如近白方块：只有边界有梯度，密度远低于 60%，不受影响。）
+    var edgeCount = 0;
+    for (final m in edge) {
+      if (m > 12) edgeCount++;
     }
+    if (edgeCount > n * 0.6) return pixels;
 
-    sample(0, 0);
-    sample(w - 1, 0);
-    sample(0, h - 1);
-    sample(w - 1, h - 1);
-    sample(w ~/ 2, 0);
-    sample(w ~/ 2, h - 1);
-    sample(0, h ~/ 2);
-    sample(w - 1, h ~/ 2);
+    // ---- 2. 种子点：四角 + 四边中点 ----
+    final seeds = <int>[
+      0, // 左上
+      w - 1, // 右上
+      (h - 1) * w, // 左下
+      n - 1, // 右下
+      w ~/ 2, // 上中
+      (h - 1) * w + w ~/ 2, // 下中
+      (h ~/ 2) * w, // 左中
+      (h ~/ 2) * w + w - 1, // 右中
+    ];
 
-    // ---- 2. 投票找主色：容差内互相归并，取最大簇 ----
-    // 簇代表取簇内第一个样本；距离用与量化一致的加权欧氏距离。
-    final clusters = <(int, int, int), int>{};
-    for (final s in samples) {
-      var matched = false;
-      for (final key in clusters.keys.toList()) {
-        if (_colorDistance(s, key) <= tolerance * tolerance * 9) {
-          clusters[key] = clusters[key]! + 1;
-          matched = true;
-          break;
+    // 种子投票：主体可能紧贴边缘（如竖直色条顶到左边），此时部分种子
+    // 落在主体上。对 8 个种子按颜色聚类（容差内归并），只保留最大簇的
+    // 种子作为背景起点——落在主体上的种子被丢弃，防止主体被吃掉。
+    final validSeeds = <int>[];
+    {
+      final seedColors = <(int, int, int)>[
+        for (final s in seeds)
+          (pixels[s * 4], pixels[s * 4 + 1], pixels[s * 4 + 2]),
+      ];
+      final voteTol2 = _toleranceToDistance2(math.max(tolerance, 24));
+      var bestCluster = 0;
+      (int, int, int)? bestColor;
+      for (int i = 0; i < seedColors.length; i++) {
+        var count = 0;
+        for (int j = 0; j < seedColors.length; j++) {
+          if (_colorDistance(seedColors[i], seedColors[j]) <= voteTol2) {
+            count++;
+          }
+        }
+        if (count > bestCluster) {
+          bestCluster = count;
+          bestColor = seedColors[i];
         }
       }
-      if (!matched) clusters[s] = 1;
-    }
-    (int, int, int)? bg;
-    var best = 0;
-    for (final e in clusters.entries) {
-      if (e.value > best) {
-        best = e.value;
-        bg = e.key;
+      if (bestColor != null && bestCluster >= 3) {
+        for (int i = 0; i < seeds.length; i++) {
+          if (_colorDistance(seedColors[i], bestColor) <= voteTol2) {
+            validSeeds.add(seeds[i]);
+          }
+        }
       }
     }
-    // 少于 3 个采样点同色：不是纯色背景，不抠。
-    if (bg == null || best < 3) return pixels;
 
-    // ---- 3. 背景色置透明 ----
-    final out = Uint8List.fromList(pixels);
-    final tol2 = tolerance * tolerance * 9;
-    for (int i = 0; i < out.length; i += 4) {
-      final d = _colorDistance(
-        (out[i], out[i + 1], out[i + 2]),
-        bg,
-      );
-      if (d <= tol2) {
-        out[i + 3] = 0;
+    // ---- 3. BFS flood fill：从每个种子扩散 ----
+    // isBg: 该像素属于背景（将被置透明）。
+    final isBg = List<bool>.filled(n, false);
+    // 每个种子独立扩散（种子色不同则区域不同，互不污染）。
+    final tol2 = _toleranceToDistance2(tolerance);
+    const maxDrift = 48; // 区域背景色最大漂移（适应渐变，防跑飞）。
+
+    for (final seed in validSeeds) {
+      final seedIdx = seed * 4;
+      // 种子本身是边缘像素：跳过（不可信的起点）。
+      if (edge[seed] > edgeThreshold) continue;
+      var bgR = pixels[seedIdx].toDouble();
+      var bgG = pixels[seedIdx + 1].toDouble();
+      var bgB = pixels[seedIdx + 2].toDouble();
+      var bgCount = 1;
+
+      final queue = Queue<int>()..add(seed);
+      final visited = List<bool>.filled(n, false);
+      visited[seed] = true;
+
+      while (queue.isNotEmpty) {
+        final idx = queue.removeFirst();
+        isBg[idx] = true;
+        final p = idx * 4;
+
+        // 滑动平均更新区域背景色（适应渐变）。
+        bgCount++;
+        final blend = 1.0 / bgCount.clamp(1, 200);
+        bgR += (pixels[p] - bgR) * blend;
+        bgG += (pixels[p + 1] - bgG) * blend;
+        bgB += (pixels[p + 2] - bgB) * blend;
+
+        final x = idx % w;
+        final y = idx ~/ w;
+        // 4 邻域扩散。
+        for (final (dx, dy) in const [(1, 0), (-1, 0), (0, 1), (0, -1)]) {
+          final nx = x + dx;
+          final ny = y + dy;
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+          final nIdx = ny * w + nx;
+          if (visited[nIdx] || isBg[nIdx]) continue;
+          // 边缘屏障：不越过主体轮廓。
+          if (edge[nIdx] > edgeThreshold) continue;
+          final np = nIdx * 4;
+          // 与当前区域背景色的距离。
+          final d = _colorDistance(
+            (pixels[np], pixels[np + 1], pixels[np + 2]),
+            (bgR.round(), bgG.round(), bgB.round()),
+          );
+          // 距离超限：不是背景（除非在漂移容忍内——渐变过渡带）。
+          if (d > tol2) {
+            // 渐变容忍：距离在 tol2 ~ tol2*2.5 之间且累计漂移未超限时，
+            // 仍并入但更新背景色（缓慢跟随渐变）。
+            if (d > tol2 * 2.5) continue;
+            final drift = _colorDistance(
+              (bgR.round(), bgG.round(), bgB.round()),
+              (pixels[seedIdx], pixels[seedIdx + 1], pixels[seedIdx + 2]),
+            );
+            if (drift > maxDrift * maxDrift * 9) continue;
+          }
+          visited[nIdx] = true;
+          queue.add(nIdx);
+        }
       }
+    }
+
+    // ---- 4. 背景像素置透明 ----
+    var bgTotal = 0;
+    for (final b in isBg) {
+      if (b) bgTotal++;
+    }
+    // 背景占比过低（<5%）：判定为误抠，放弃（保护纯色主体图）。
+    if (bgTotal < n * 0.05) return pixels;
+
+    final out = Uint8List.fromList(pixels);
+    for (int i = 0; i < n; i++) {
+      if (isBg[i]) out[i * 4 + 3] = 0;
     }
     return out;
+  }
+
+  /// Sobel 边缘检测：返回每像素的梯度幅值（灰度 + RGB 通道取最大）。
+  static Float32List _sobelMagnitude(Uint8List pixels, int w, int h) {
+    // 先转灰度。
+    final gray = Float32List(w * h);
+    for (int i = 0, p = 0; i < w * h; i++, p += 4) {
+      gray[i] = 0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2];
+    }
+    final mag = Float32List(w * h);
+    for (int y = 1; y < h - 1; y++) {
+      for (int x = 1; x < w - 1; x++) {
+        final i = y * w + x;
+        final tl = gray[i - w - 1], t = gray[i - w], tr = gray[i - w + 1];
+        final l = gray[i - 1], r = gray[i + 1];
+        final bl = gray[i + w - 1], b = gray[i + w], br = gray[i + w + 1];
+        // Sobel 算子（灰度）。
+        final gx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+        final gy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+        // 彩色图还要考虑颜色突变（灰度相同但色相不同的边界）：
+        // 用 RGB 分量分别 Sobel 取最大值。
+        double maxC = gx * gx + gy * gy;
+        for (int ch = 0; ch < 3; ch++) {
+          final cTl = pixels[(i - w - 1) * 4 + ch].toDouble();
+          final cT = pixels[(i - w) * 4 + ch].toDouble();
+          final cTr = pixels[(i - w + 1) * 4 + ch].toDouble();
+          final cL = pixels[(i - 1) * 4 + ch].toDouble();
+          final cR = pixels[(i + 1) * 4 + ch].toDouble();
+          final cBl = pixels[(i + w - 1) * 4 + ch].toDouble();
+          final cB = pixels[(i + w) * 4 + ch].toDouble();
+          final cBr = pixels[(i + w + 1) * 4 + ch].toDouble();
+          final cgx = (cTr + 2 * cR + cBr) - (cTl + 2 * cL + cBl);
+          final cgy = (cBl + 2 * cB + cBr) - (cTl + 2 * cT + cTr);
+          final m = cgx * cgx + cgy * cgy;
+          if (m > maxC) maxC = m;
+        }
+        mag[i] = math.sqrt(maxC);
+      }
+    }
+    return mag;
+  }
+
+  /// 容差（0~128）转加权距离平方阈值。
+  static int _toleranceToDistance2(int tolerance) {
+    // 容差线性映射到每通道最大偏差，再转加权距离平方。
+    // tolerance=32 时每通道约偏差 32，加权距离平方 ≈ 9*32² = 9216。
+    final t = tolerance * 3;
+    return t * t * 9;
   }
 
   /// 加权颜色距离平方（与量化权重一致：2r²+4g²+3b²）。

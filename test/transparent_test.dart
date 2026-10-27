@@ -251,6 +251,131 @@ void main() {
       // 容差 32 时近白方块内部也被抠掉。
       expect(loose.cellAt(5, 5), isNull);
     });
+
+    test('flood fill 连通性：主体内部的同色区域不被误抠', () {
+      // 白底 + 红色圆环（环内是白色孔洞）：孔洞与外部背景不连通，
+      // flood fill 不应穿过红环抠掉孔洞。
+      final px = Uint8List(30 * 30 * 4);
+      for (int y = 0; y < 30; y++) {
+        for (int x = 0; x < 30; x++) {
+          final idx = (y * 30 + x) * 4;
+          final dx = x - 15, dy = y - 15;
+          final dist = (dx * dx + dy * dy);
+          final inRing = dist <= 100; // 半径 10
+          final inHole = dist <= 16; // 半径 4 的孔
+          if (inRing && !inHole) {
+            px[idx] = 220;
+            px[idx + 1] = 30;
+            px[idx + 2] = 40;
+          } else {
+            px[idx] = 255;
+            px[idx + 1] = 255;
+            px[idx + 2] = 255;
+          }
+          px[idx + 3] = 255;
+        }
+      }
+      final pattern = BeadConverter.convert(
+        pixels: px,
+        srcWidth: 30,
+        srcHeight: 30,
+        options: const ConvertOptions(
+          gridWidth: 15,
+          gridHeight: 15,
+          dither: false,
+          removeBackground: true,
+          bgTolerance: 32,
+        ),
+      );
+      // 四角为空格（外部背景被抠）。
+      expect(pattern.cellAt(0, 0), isNull);
+      // 圆环主体保留（红色系）。
+      final ring = pattern.cellAt(4, 7)!; // 环上位置（距中心约 3.7 格）
+      expect(ring.red, greaterThan(ring.green));
+      // 中心孔洞（与外部不连通的白色）应保留为豆，不是空格。
+      expect(pattern.cellAt(7, 7), isNotNull,
+          reason: '环内白色孔洞与边缘不连通，不应被抠掉');
+    });
+
+    test('渐变背景上的主体：渐变背景被抠、主体保留', () {
+      // 浅灰渐变背景（左上 200 → 右下 240）+ 中央深蓝方块。
+      final px = Uint8List(40 * 40 * 4);
+      for (int y = 0; y < 40; y++) {
+        for (int x = 0; x < 40; x++) {
+          final idx = (y * 40 + x) * 4;
+          final inSquare = x >= 12 && x < 28 && y >= 12 && y < 28;
+          if (inSquare) {
+            px[idx] = 30;
+            px[idx + 1] = 40;
+            px[idx + 2] = 110;
+          } else {
+            final v = 200 + (x + y) * 55 ~/ 78; // 200~255 渐变
+            px[idx] = v;
+            px[idx + 1] = v;
+            px[idx + 2] = v;
+          }
+          px[idx + 3] = 255;
+        }
+      }
+      final pattern = BeadConverter.convert(
+        pixels: px,
+        srcWidth: 40,
+        srcHeight: 40,
+        options: const ConvertOptions(
+          gridWidth: 20,
+          gridHeight: 20,
+          dither: false,
+          removeBackground: true,
+          bgTolerance: 32,
+        ),
+      );
+      // 四角为空格（渐变背景被抠）。
+      expect(pattern.cellAt(0, 0), isNull);
+      expect(pattern.cellAt(14, 14), isNull);
+      // 中心主体保留（蓝色系）。
+      final center = pattern.cellAt(9, 9)!;
+      expect(center.blue, greaterThan(center.red));
+      expect(center.blue, greaterThan(center.green));
+    });
+
+    test('主体紧贴边缘：边缘屏障防止主体被吃掉', () {
+      // 白底 + 左侧竖直红条（红条直接顶到左边缘）：
+      // 左边中点种子落在红条上（非背景色），不应把红条抠掉。
+      final px = Uint8List(30 * 30 * 4);
+      for (int y = 0; y < 30; y++) {
+        for (int x = 0; x < 30; x++) {
+          final idx = (y * 30 + x) * 4;
+          if (x < 8) {
+            px[idx] = 220;
+            px[idx + 1] = 30;
+            px[idx + 2] = 40;
+          } else {
+            px[idx] = 255;
+            px[idx + 1] = 255;
+            px[idx + 2] = 255;
+          }
+          px[idx + 3] = 255;
+        }
+      }
+      final pattern = BeadConverter.convert(
+        pixels: px,
+        srcWidth: 30,
+        srcHeight: 30,
+        options: const ConvertOptions(
+          gridWidth: 15,
+          gridHeight: 15,
+          dither: false,
+          removeBackground: true,
+          bgTolerance: 32,
+        ),
+      );
+      // 红条区域（左侧 1/4）应保留为红色系豆。
+      final strip = pattern.cellAt(1, 7)!;
+      expect(strip.red, greaterThan(strip.green));
+      expect(strip.red, greaterThan(strip.blue));
+      // 右侧背景应为空格。
+      expect(pattern.cellAt(12, 7), isNull);
+    });
   });
 
   group('项目持久化：空格 RLE', () {
