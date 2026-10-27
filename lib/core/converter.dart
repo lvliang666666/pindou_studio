@@ -205,8 +205,13 @@ class BeadConverter {
     if (w < 3 || h < 3) return pixels;
     final n = w * h;
 
-    // ---- 1. Sobel 边缘检测：梯度幅值 ----
-    final edge = _sobelMagnitude(pixels, w, h);
+    // ---- 1. 去噪 + Sobel 边缘检测 ----
+    // 真实照片/JPEG 有噪声（±8/通道），原始 Sobel 会在噪声上产生
+    // 假梯度（幅值可达 ~90），导致"满图都是边缘"——无主体守卫误触发、
+    // 扩散屏障到处都是。先做 3x3 box blur 压噪，再检测边缘。
+    // 模糊只用于边缘检测；flood fill 仍用原图颜色（保细节）。
+    final blurred = _boxBlur3(pixels, w, h);
+    final edge = _sobelMagnitude(blurred, w, h);
     // 边缘阈值：梯度幅值 > 该值的像素不参与扩散（屏障）。
     // 容差越大，边缘阈值越宽松（用户想要更激进的抠图时容忍越过弱边）。
     final edgeThreshold = 96.0 + tolerance * 1.2;
@@ -215,7 +220,7 @@ class BeadConverter {
     // 可见变化）时没有可辨识的主体边界，flood fill 会吞掉整张图，
     // 抠图无意义——原图返回（用户得到完整图纸而不是全空图纸）。
     // 用"弱边缘密度"判定：梯度 > 12 的像素占比超过 60% 视为无主体。
-    // （低对比主体如近白方块：只有边界有梯度，密度远低于 60%，不受影响。）
+    // （去噪后真实照片的平坦区域梯度接近 0，不再误触发。）
     var edgeCount = 0;
     for (final m in edge) {
       if (m > 12) edgeCount++;
@@ -394,6 +399,34 @@ class BeadConverter {
     // tolerance=32 时每通道约偏差 32，加权距离平方 ≈ 9*32² = 9216。
     final t = tolerance * 3;
     return t * t * 9;
+  }
+
+  /// 3x3 box blur（边缘检测前的去噪预处理）。
+  /// 边界像素用 clamp 邻域；alpha 通道同样平滑（半透明边缘更稳定）。
+  static Uint8List _boxBlur3(Uint8List pixels, int w, int h) {
+    final out = Uint8List(pixels.length);
+    for (int y = 0; y < h; y++) {
+      final y0 = y == 0 ? 0 : y - 1;
+      final y1 = y == h - 1 ? h - 1 : y + 1;
+      for (int x = 0; x < w; x++) {
+        final x0 = x == 0 ? 0 : x - 1;
+        final x1 = x == w - 1 ? w - 1 : x + 1;
+        final oIdx = (y * w + x) * 4;
+        for (int ch = 0; ch < 4; ch++) {
+          final sum = pixels[(y0 * w + x0) * 4 + ch] +
+              pixels[(y0 * w + x) * 4 + ch] +
+              pixels[(y0 * w + x1) * 4 + ch] +
+              pixels[(y * w + x0) * 4 + ch] +
+              pixels[oIdx + ch] +
+              pixels[(y * w + x1) * 4 + ch] +
+              pixels[(y1 * w + x0) * 4 + ch] +
+              pixels[(y1 * w + x) * 4 + ch] +
+              pixels[(y1 * w + x1) * 4 + ch];
+          out[oIdx + ch] = (sum / 9).round();
+        }
+      }
+    }
+    return out;
   }
 
   /// 加权颜色距离平方（与量化权重一致：2r²+4g²+3b²）。
