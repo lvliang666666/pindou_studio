@@ -81,10 +81,19 @@ class BeadStitcher {
 
   /// 按新颗粒度重新拼合（保留来源图与每行张数，只改单张最长边）。
   /// 转换参数沿用首次拼合时的抖动设置。
+  /// 一板多图配方（boardMode）：总尺寸固定为底板，颗粒度不可调，
+  /// 直接按原参数重拼（忽略 perImageMaxSize）。
   static StitchResult restitch(
     StitchRecipe recipe, {
     required int perImageMaxSize,
   }) {
+    if (recipe.boardMode) {
+      return stitchOnBoard(
+        images: recipe.images,
+        boardSize: recipe.boardSize,
+        options: recipe.options,
+      );
+    }
     return stitch(
       images: recipe.images,
       options: recipe.options.copyWith(perImageMaxSize: perImageMaxSize),
@@ -322,11 +331,24 @@ class BeadStitcher {
 /// 拼合结果装入编辑器时保留，用户改「图纸尺寸」确认后按新颗粒度
 /// 重新拼合（颗粒度可调，不用回对话框重来）。
 class StitchRecipe {
-  const StitchRecipe({required this.images, required this.options});
+  const StitchRecipe({
+    required this.images,
+    required this.options,
+    this.boardMode = false,
+    this.boardSize = 50,
+  });
 
   /// 来源图（RGBA 像素, 宽, 高）。
   final List<(Uint8List, int, int)> images;
 
   /// 首次拼合的参数（columns/dither 等沿用，perImageMaxSize 可变）。
   final StitchOptions options;
+
+  /// 是否为一板多图模式（stitchOnBoard 生成）。
+  /// true 时重新拼合走 stitchOnBoard（boardSize 固定，颗粒度由
+  /// 板内布局决定，改尺寸确认无意义）。
+  final bool boardMode;
+
+  /// 底板尺寸（boardMode 时有效）。
+  final int boardSize;
 }
