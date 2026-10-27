@@ -16,6 +16,7 @@ import '../export_service.dart';
 import '../pattern_canvas.dart';
 import '../print_service.dart';
 import '../settings_dialog.dart';
+import '../stitch_dialog.dart';
 
 /// 编辑器页面：参数区 + 图纸画布 + 统计导出区。
 ///
@@ -147,6 +148,17 @@ class _EditorPageState extends State<EditorPage> {
         SnackBar(content: Text('加载失败：$e')),
       );
     }
+  }
+
+  /// 多图拼合：对话框内完成转换，结果装入编辑器（保留配方支持改颗粒度重拼）。
+  Future<void> _stitchImages() async {
+    final result = await showStitchDialog(context);
+    if (result == null || !mounted) return;
+    widget.state.loadPattern(
+      result.$1.pattern,
+      name: '多图拼合',
+      stitchRecipe: result.$2,
+    );
   }
 
   /// 最近导入菜单（参数区「导入图片」旁的下拉入口）。
@@ -613,6 +625,12 @@ class _EditorPageState extends State<EditorPage> {
               icon: const Icon(Icons.history, size: 18),
               label: const Text('最近导入'),
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: state.converting ? null : _stitchImages,
+              icon: const Icon(Icons.grid_view, size: 18),
+              label: const Text('多图拼合'),
+            ),
             if (state.previewImage != null) ...[
               const SizedBox(height: 12),
               ClipRRect(
@@ -656,8 +674,18 @@ class _EditorPageState extends State<EditorPage> {
               },
             ),
             const SizedBox(height: 16),
-            Text('图纸尺寸（豆数）',
-                style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              state.isStitched ? '单张颗粒度（豆）' : '图纸尺寸（豆数）',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            if (state.isStitched)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '拼合项目：宽/高填单张最长边，确认后重新拼合',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
             const SizedBox(height: 8),
             Row(
               children: [

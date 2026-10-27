@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:image/image.dart' as img;
 
 import '../core/converter.dart';
 import '../core/palette.dart';
+import '../core/stitcher.dart';
 import '../data/project_model.dart';
 import '../data/project_repository.dart';
 
@@ -213,9 +215,21 @@ class EditorState extends ChangeNotifier {
   /// 回车/失焦/预设/确认按钮都会走到这里。
   /// [fromField] 指明用户最后编辑的是哪个框：联动以它为准
   /// （'w' = 以宽算高，'h' = 以高算宽，null = 默认以宽为准）。
+  ///
+  /// 拼合项目（isStitched）：宽/高输入框含义为「单张最长边」，
+  /// 确认后按新颗粒度重新拼合（取宽高较大者，与对话框滑块同义）。
   void confirmGridSize({String? fromField}) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 150), () async {
+      final recipe = _stitchRecipe;
+      if (recipe != null) {
+        final gw = int.tryParse(gridWidthCtrl.text) ?? 0;
+        final gh = int.tryParse(gridHeightCtrl.text) ?? 0;
+        final maxSize = gw >= 1 || gh >= 1 ? math.max(gw, gh) : 0;
+        if (maxSize < 1) return; // 无效输入不渲染
+        await _restitch(recipe, perImageMaxSize: maxSize);
+        return;
+      }
       var gw = int.tryParse(gridWidthCtrl.text) ?? 0;
       var gh = int.tryParse(gridHeightCtrl.text) ?? 0;
       // 锁定比例时以最后编辑的框为准联动另一个框。
@@ -231,6 +245,40 @@ class EditorState extends ChangeNotifier {
       if (gw < 1 || gh < 1) return; // 无效输入不渲染
       await reconvert();
     });
+  }
+
+  /// 按新颗粒度重新拼合（isolate 中执行，避免多张大图卡 UI）。
+  Future<void> _restitch(
+    StitchRecipe recipe, {
+    required int perImageMaxSize,
+  }) async {
+    _converting = true;
+    notifyListeners();
+    try {
+      final result = await compute(
+        _restitchSync,
+        _RestitchArgs(recipe, perImageMaxSize),
+      );
+      _undoStack.clear();
+      _redoStack.clear();
+      _currentStroke = null;
+      manualEdits.clear();
+      _autoCodes.clear();
+      pattern = result.pattern;
+      gridWidthCtrl.text = '${result.pattern.width}';
+      gridHeightCtrl.text = '${result.pattern.height}';
+      hasUnsavedChanges = true;
+    } finally {
+      _converting = false;
+      notifyListeners();
+    }
+  }
+
+  static StitchResult _restitchSync(_RestitchArgs args) {
+    return BeadStitcher.restitch(
+      args.recipe,
+      perImageMaxSize: args.perImageMaxSize,
+    );
   }
 
   /// 手动替换某格颜色（按色号），并更新统计。单独一步，可撤销。
@@ -557,6 +605,50 @@ class EditorState extends ChangeNotifier {
     );
   }
 
+  /// 装入一张现成图纸（多图拼合等外部生成结果），作为"无原图项目"打开。
+  ///
+  /// 与 loadImage 的区别：没有原图像素，亮度/对比度等参数调整不可用
+  /// （与加载旧项目一致），但手动编辑/导出/打印/保存全链路可用。
+  ///
+  /// [stitchRecipe] 非空时（多图拼合结果）：保留拼合配方，
+  /// 图纸尺寸确认（confirmGridSize）按新颗粒度重新拼合。
+  void loadPattern(BeadPattern p, {String name = '多图拼合', StitchRecipe? stitchRecipe}) {
+    _debounce?.cancel();
+    projectId = null;
+    projectName = name;
+    createdAt = null;
+    pattern = p;
+    manualEdits.clear();
+    _autoCodes.clear();
+    dither = true;
+    brightness = 0;
+    contrast = 0;
+    colorLimit = 0;
+    gridWidthCtrl.text = '${p.width}';
+    gridHeightCtrl.text = '${p.height}';
+    _fileName = null;
+    _sourceExt = null;
+    _undoStack.clear();
+    _redoStack.clear();
+    _currentStroke = null;
+    brushCode = null;
+    _pixels = null;
+    _srcWidth = 0;
+    _srcHeight = 0;
+    _sourceBytes = null;
+    previewImage = null;
+    _stitchRecipe = stitchRecipe;
+    hasUnsavedChanges = true;
+    notifyListeners();
+  }
+
+  /// 多图拼合配方（拼合结果装入时非空）：来源图 + 每行张数。
+  /// 图纸尺寸确认时按新「单张最长边」重新拼合（颗粒度可调）。
+  StitchRecipe? _stitchRecipe;
+
+  /// 当前是否为拼合项目（参数区提示用）。
+  bool get isStitched => _stitchRecipe != null;
+
   // ---------- 项目保存 / 加载 ----------
 
   /// 保存当前项目。新项目自动生成 id；[name] 为空时用原文件名或默认名。
@@ -634,6 +726,7 @@ class EditorState extends ChangeNotifier {
     _redoStack.clear();
     _currentStroke = null;
     _autoCodes.clear();
+    _stitchRecipe = null; // 打开普通项目：拼合配方作废
     hasUnsavedChanges = false;
 
     // 恢复留存的原图（异步读盘 + 解码；失败不阻塞项目打开）。
@@ -672,6 +765,7 @@ class EditorState extends ChangeNotifier {
     _sourceBytes = null;
     _sourceExt = null;
     previewImage = null;
+    _stitchRecipe = null;
     dither = true;
     brightness = 0;
     contrast = 0;
@@ -703,6 +797,13 @@ class _ConvertArgs {
   final int srcWidth;
   final int srcHeight;
   final ConvertOptions options;
+}
+
+/// 重新拼合的 isolate 参数。
+class _RestitchArgs {
+  const _RestitchArgs(this.recipe, this.perImageMaxSize);
+  final StitchRecipe recipe;
+  final int perImageMaxSize;
 }
 
 /// 单格编辑记录：颜色从 oldCode 改为 newCode。
