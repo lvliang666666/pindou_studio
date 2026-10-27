@@ -33,15 +33,15 @@ void main() {
       expect(state.canUndo, isFalse);
       state.editCell(0, 0, white);
       expect(state.canUndo, isTrue);
-      expect(state.pattern!.cellAt(0, 0).code, 'A1');
+      expect(state.pattern!.cellAt(0, 0)!.code, 'A1');
 
       state.undo();
-      expect(state.pattern!.cellAt(0, 0).code, 'D1'); // 恢复自动转换色
+      expect(state.pattern!.cellAt(0, 0)!.code, 'D1'); // 恢复自动转换色
       expect(state.canRedo, isTrue);
       expect(state.manualEdits.isEmpty, isTrue);
 
       state.redo();
-      expect(state.pattern!.cellAt(0, 0).code, 'A1');
+      expect(state.pattern!.cellAt(0, 0)!.code, 'A1');
       expect(state.manualEdits['0,0'], 'A1');
       state.dispose();
     });
@@ -56,15 +56,15 @@ void main() {
       state.paintCell(2, 0, white);
       state.endStroke();
 
-      expect(state.pattern!.cellAt(0, 0).code, 'A1');
-      expect(state.pattern!.cellAt(1, 0).code, 'A1');
-      expect(state.pattern!.cellAt(2, 0).code, 'A1');
+      expect(state.pattern!.cellAt(0, 0)!.code, 'A1');
+      expect(state.pattern!.cellAt(1, 0)!.code, 'A1');
+      expect(state.pattern!.cellAt(2, 0)!.code, 'A1');
       expect(state.manualEdits.length, 3);
 
       state.undo();
-      expect(state.pattern!.cellAt(0, 0).code, 'D1');
-      expect(state.pattern!.cellAt(1, 0).code, 'D1');
-      expect(state.pattern!.cellAt(2, 0).code, 'D1');
+      expect(state.pattern!.cellAt(0, 0)!.code, 'D1');
+      expect(state.pattern!.cellAt(1, 0)!.code, 'D1');
+      expect(state.pattern!.cellAt(2, 0)!.code, 'D1');
       expect(state.manualEdits.isEmpty, isTrue);
 
       state.redo();
@@ -82,9 +82,9 @@ void main() {
       state.paintCell(0, 0, black);
       state.endStroke();
 
-      expect(state.pattern!.cellAt(0, 0).code, 'B1');
+      expect(state.pattern!.cellAt(0, 0)!.code, 'B1');
       state.undo();
-      expect(state.pattern!.cellAt(0, 0).code, 'D1'); // 一步回到最初
+      expect(state.pattern!.cellAt(0, 0)!.code, 'D1'); // 一步回到最初
       state.dispose();
     });
 
@@ -120,19 +120,23 @@ void main() {
 
       state.editCell(0, 0, white);
       state.eraseCell(0, 0);
-      expect(state.pattern!.cellAt(0, 0).code, 'D1');
+      expect(state.pattern!.cellAt(0, 0)!.code, 'D1');
       expect(state.manualEdits.isEmpty, isTrue);
 
       state.undo(); // 撤销擦除 -> 回到 A1
-      expect(state.pattern!.cellAt(0, 0).code, 'A1');
+      expect(state.pattern!.cellAt(0, 0)!.code, 'A1');
       state.dispose();
     });
 
-    test('未编辑过的格子擦除无效果', () {
+    test('未编辑过的格子擦除 = 擦成空格（抠背景兜底）', () {
       final state = _makeState();
       state.eraseCell(3, 3);
-      expect(state.pattern!.cellAt(3, 3).code, 'D1');
-      expect(state.canUndo, isFalse);
+      // 新语义：右键擦除自动转换色的格子 → 变空格（清除残留豆）。
+      expect(state.pattern!.cellAt(3, 3), isNull);
+      expect(state.canUndo, isTrue);
+      // 撤销后恢复原豆。
+      state.undo();
+      expect(state.pattern!.cellAt(3, 3)!.code, 'D1');
       state.dispose();
     });
   });

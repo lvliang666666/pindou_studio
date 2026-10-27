@@ -256,10 +256,11 @@ class _GridPainter {
     final totalW = width * cell;
     final totalH = height * cell;
 
-    // 色块与色号。
+    // 色块与色号。空格（null）留白不填色不标号。
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
         final bead = pattern.cellAt(x0 + x, y0 + y);
+        if (bead == null) continue;
         final px = labelGutter + x * cell;
         final py = labelGutter + totalH - (y + 1) * cell; // 行号向下增长
         canvas.setFillColor(PdfColor.fromInt(bead.argb));

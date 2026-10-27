@@ -327,7 +327,9 @@ class ProjectRepository {
     final sy = h / pattern.height;
     for (int y = 0; y < pattern.height; y++) {
       for (int x = 0; x < pattern.width; x++) {
-        fill.color = Color(pattern.cellAt(x, y).argb);
+        final bead = pattern.cellAt(x, y);
+        if (bead == null) continue; // 空格：缩略图留白。
+        fill.color = Color(bead.argb);
         canvas.drawRect(
           Rect.fromLTWH(x * sx, y * sy, sx + 0.5, sy + 0.5),
           fill,

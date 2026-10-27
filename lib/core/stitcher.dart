@@ -144,7 +144,7 @@ class BeadStitcher {
     final rows = (converted.length + cols - 1) ~/ cols;
     final totalW = cellW * cols;
     final totalH = cellH * rows;
-    final cells = List<BeadColor>.filled(totalW * totalH, filler);
+    final cells = List<BeadColor?>.filled(totalW * totalH, filler);
     for (var i = 0; i < cellsList.length; i++) {
       final cx = i % cols;
       final cy = i ~/ cols;
@@ -184,13 +184,13 @@ class BeadStitcher {
   }
 
   /// 子图居中 pad 到 cellW x cellH（空白填 filler）。
-  static List<BeadColor> _padCentered(
+  static List<BeadColor?> _padCentered(
     BeadPattern p,
     int cellW,
     int cellH,
     BeadColor filler,
   ) {
-    final out = List<BeadColor>.filled(cellW * cellH, filler);
+    final out = List<BeadColor?>.filled(cellW * cellH, filler);
     final offX = (cellW - p.width) ~/ 2;
     final offY = (cellH - p.height) ~/ 2;
     for (int y = 0; y < p.height; y++) {
@@ -202,9 +202,10 @@ class BeadStitcher {
   }
 
   /// 统计用量并生成图纸对象（与 BeadConverter._buildPattern 同规则）。
-  static BeadPattern _buildPattern(List<BeadColor> cells, int w, int h) {
+  static BeadPattern _buildPattern(List<BeadColor?> cells, int w, int h) {
     final counts = <BeadColor, int>{};
     for (final c in cells) {
+      if (c == null) continue;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     final sorted = counts.entries.toList()

@@ -66,10 +66,11 @@ class SavedProject {
   final int contrast;
   final int colorLimit;
 
+
   /// 所用色卡 id（旧项目无此字段时回退 'default'）。
   final String paletteId;
 
-  /// 从图纸构建项目。
+  /// 从图纸构建项目。空格（null 格）编码为空字符串色号。
   factory SavedProject.fromPattern({
     required String id,
     required String name,
@@ -95,7 +96,7 @@ class SavedProject {
       updatedAt: updatedAt ?? now,
       width: pattern.width,
       height: pattern.height,
-      cellCodes: [for (final c in pattern.cells) c.code],
+      cellCodes: [for (final c in pattern.cells) c?.code ?? ''],
       manualEdits: Map.of(manualEdits),
       sourceFileName: sourceFileName,
       sourceWidth: sourceWidth,
@@ -110,16 +111,22 @@ class SavedProject {
   }
 
   /// 还原为图纸（色号无效的格子跳过，返回 null 表示数据损坏）。
+  /// 空字符串色号 = 空格（不放豆）。
   BeadPattern? toPattern() {
     if (cellCodes.length != width * height) return null;
-    final cells = <BeadColor>[];
+    final cells = <BeadColor?>[];
     for (final code in cellCodes) {
+      if (code.isEmpty) {
+        cells.add(null);
+        continue;
+      }
       final bead = BeadPalette.byCode[code];
       if (bead == null) return null;
       cells.add(bead);
     }
     final counts = <BeadColor, int>{};
     for (final c in cells) {
+      if (c == null) continue;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     final sorted = counts.entries.toList()

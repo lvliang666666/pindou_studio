@@ -27,7 +27,7 @@ void main() {
     expect(state.pattern!.height, 29);
     expect(state.pattern!.totalBeads, 29 * 29);
     // 红色图应量化为 D1 正红。
-    expect(state.pattern!.cellAt(0, 0).code, 'D1');
+    expect(state.pattern!.cellAt(0, 0)!.code, 'D1');
   });
 
   test('loadImage 接受 PNG（RGBA）正常', () async {
@@ -45,7 +45,7 @@ void main() {
     await state.loadImage(pngBytes, 'test.png');
 
     expect(state.pattern, isNotNull);
-    expect(state.pattern!.cellAt(0, 0).code, 'D1');
+    expect(state.pattern!.cellAt(0, 0)!.code, 'D1');
   });
 
   test('loadImage 拒绝无效字节并抛 FormatException', () async {

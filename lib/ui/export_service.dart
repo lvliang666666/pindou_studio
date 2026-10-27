@@ -45,10 +45,11 @@ class ExportService {
     final fillPaint = Paint()..style = PaintingStyle.fill;
     final textPainter = TextPainter(textDirection: TextDirection.ltr);
 
-    // 色块。
+    // 色块。空格（null）留白不填色不标号。
     for (int y = 0; y < pattern.height; y++) {
       for (int x = 0; x < pattern.width; x++) {
         final bead = pattern.cellAt(x, y);
+        if (bead == null) continue;
         final rect =
             Rect.fromLTWH(margin + x * cell.toDouble(), margin + y * cell.toDouble(), cell.toDouble(), cell.toDouble());
         fillPaint.color = Color(bead.argb);
@@ -229,7 +230,7 @@ class ExportService {
         final y0 = by * boardSize;
         final w = (pattern.width - x0).clamp(1, boardSize);
         final h = (pattern.height - y0).clamp(1, boardSize);
-        final cells = <BeadColor>[];
+        final cells = <BeadColor?>[];
         for (int y = y0; y < y0 + h; y++) {
           for (int x = x0; x < x0 + w; x++) {
             cells.add(pattern.cellAt(x, y));
@@ -237,6 +238,7 @@ class ExportService {
         }
         final counts = <BeadColor, int>{};
         for (final c in cells) {
+          if (c == null) continue;
           counts[c] = (counts[c] ?? 0) + 1;
         }
         final sorted = counts.entries.toList()

@@ -101,7 +101,7 @@ void main() {
     state.editCell(0, 0, white);
     await tester.pump();
 
-    expect(state.pattern!.cellAt(0, 0).code, 'A1');
+    expect(state.pattern!.cellAt(0, 0)!.code, 'A1');
     expect(state.manualEdits['0,0'], 'A1');
     // 统计中 A1 应有 1 个。
     final a1 = state.pattern!.counts.where((c) => c.color.code == 'A1');

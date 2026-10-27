@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -41,11 +42,12 @@ class PatternCanvas extends StatefulWidget {
   final String? brushCode;
 
   /// 画笔涂到某格（笔画过程中连续回调）。
-  /// 返回实际应用的颜色（格子无变化为 null），供叠加层即时显示。
-  final BeadColor? Function(int x, int y)? onPaintCell;
+  /// 返回 (是否有变化, 新内容)：新内容 null = 该格变为空格。
+  final (bool, BeadColor?) Function(int x, int y)? onPaintCell;
 
-  /// 右键擦除某格（恢复自动转换色）。返回恢复后的颜色，无编辑记录为 null。
-  final BeadColor? Function(int x, int y)? onEraseCell;
+  /// 右键擦除某格（恢复自动转换色或擦成空格）。
+  /// 返回 (是否有变化, 新内容)：新内容 null = 该格变为空格。
+  final (bool, BeadColor?) Function(int x, int y)? onEraseCell;
 
   /// 笔画开始/结束（用于把一次拖动合并为一步撤销）。
   final VoidCallback? onStrokeStart;
@@ -85,11 +87,12 @@ class _PatternCanvasState extends State<PatternCanvas> {
   final ValueNotifier<int> _overlayVersion = ValueNotifier<int>(0);
 
   /// 本笔画中变化的格子与最新颜色（叠加层绘制内容）。
-  final List<(int, int, BeadColor)> _dirtyCells = [];
+  /// bead 为 null = 该格被擦成空格（棋盘格显示）。
+  final List<(int, int, BeadColor?)> _dirtyCells = [];
 
   /// 待增量光栅化的脏格子（笔画结束到光栅化完成期间持有）。
   /// 光栅化时只重绘这些格子（叠加到旧位图上），避免全图重绘。
-  List<(int, int, BeadColor)>? _pendingDirtyCells;
+  List<(int, int, BeadColor?)>? _pendingDirtyCells;
 
   void _onTransformChanged() {
     // 只更新缩放百分比显示（ValueListenableBuilder 局部刷新，不重建子树）。
@@ -222,6 +225,22 @@ class _PatternCanvasState extends State<PatternCanvas> {
         // 扩出去的部分随后被补画的线覆盖，视觉无损失。
         const bleed = 1.2;
         for (final (x, y, bead) in dirty) {
+          if (bead == null) {
+            // 擦成空格：先清掉旧色块（画画布底色），再画棋盘格。
+            fill.color = widget.colors.canvasBg;
+            canvas.drawRect(
+              Rect.fromLTWH(
+                x * _baseCell - bleed,
+                y * _baseCell - bleed,
+                _baseCell + bleed * 2,
+                _baseCell + bleed * 2,
+              ),
+              fill,
+            );
+            _drawEmptyCell(canvas, x * _baseCell, y * _baseCell, _baseCell,
+                widget.colors.emptyCell);
+            continue;
+          }
           fill.color = Color(bead.argb);
           canvas.drawRect(
             Rect.fromLTWH(
@@ -479,16 +498,14 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _paintAt(int x, int y) {
-    // 回调同步更新 pattern.cells 并返回实际应用的颜色；
-    // 无变化（同色重复涂/未编辑过的擦除）返回 null，不记脏格子。
-    final BeadColor? applied;
-    if (_erasing) {
-      applied = widget.onEraseCell?.call(x, y);
-    } else {
-      applied = widget.onPaintCell?.call(x, y);
-    }
-    if (applied == null) return;
-    _dirtyCells.add((x, y, applied));
+    // 回调返回 (是否有变化, 新内容)。笔画中 pattern.cells 是旧内容
+    // （快速路径写可变副本，endStroke 才重建），不能靠读 pattern
+    // 判断变化——必须由状态层明确告知。
+    final r = _erasing
+        ? widget.onEraseCell?.call(x, y)
+        : widget.onPaintCell?.call(x, y);
+    if (r == null || !r.$1) return;
+    _dirtyCells.add((x, y, r.$2));
     _overlayVersion.value++;
   }
 
@@ -675,8 +692,8 @@ class _StrokeOverlayPainter extends CustomPainter {
     required this.version,
   });
 
-  /// 本笔画中变化的格子与最新颜色。
-  final List<(int, int, BeadColor)> dirtyCells;
+  /// 本笔画中变化的格子与最新颜色。null = 擦成空格。
+  final List<(int, int, BeadColor?)> dirtyCells;
   final double cell;
 
   /// 版本号：每次涂色递增，驱动重绘。
@@ -686,6 +703,11 @@ class _StrokeOverlayPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final fill = Paint()..style = PaintingStyle.fill;
     for (final (x, y, bead) in dirtyCells) {
+      if (bead == null) {
+        // 擦成空格：画棋盘格（与全量绘制的空格样式一致）。
+        _drawEmptyCell(canvas, x * cell, y * cell, cell);
+        continue;
+      }
       fill.color = Color(bead.argb);
       canvas.drawRect(
         Rect.fromLTWH(x * cell, y * cell, cell, cell),
@@ -781,9 +803,17 @@ class _PatternPainter extends CustomPainter {
 
     for (int y = y0; y < y1; y++) {
       // 同色连续格子合并为一个矩形，减少 drawRect 调用。
+      // 空格（null）单独处理：画棋盘格纹理表示"不放豆"。
       int runStart = x0;
       BeadColor? runBead;
+      bool runEmpty = false;
       void flushRun(int endX) {
+        if (runEmpty) {
+          for (int x = runStart; x < endX; x++) {
+            _drawEmptyCell(canvas, x * cell, y * cell, cell, colors.emptyCell);
+          }
+          return;
+        }
         if (runBead == null) return;
         fillPaint.color = Color(runBead.argb);
         canvas.drawRect(
@@ -794,10 +824,12 @@ class _PatternPainter extends CustomPainter {
 
       for (int x = x0; x < x1; x++) {
         final bead = pattern.cellAt(x, y);
-        if (bead != runBead) {
+        final isEmpty = bead == null;
+        if (isEmpty != runEmpty || (!isEmpty && bead != runBead)) {
           flushRun(x);
           runStart = x;
-          runBead = bead;
+          runBead = isEmpty ? null : bead;
+          runEmpty = isEmpty;
         }
       }
       flushRun(x1);
@@ -938,5 +970,33 @@ void drawDashedLine(Canvas canvas, Paint paint, Offset start, Offset end) {
       paint,
     );
     dist = segEnd + gapLen;
+  }
+}
+
+/// 绘制单个空格的棋盘格纹理（全量绘制、笔画叠加层共用）。
+/// [color] 缺省时用默认浅灰（叠加层无主题色上下文）。
+void _drawEmptyCell(
+  Canvas canvas,
+  double px,
+  double py,
+  double cell, [
+  Color color = const Color(0x14000000),
+]) {
+  const sq = 8.0;
+  final checker = Paint()..color = color;
+  final cols = (cell / sq).ceil();
+  final rows = (cell / sq).ceil();
+  for (int yy = 0; yy < rows; yy++) {
+    for (int xx = 0; xx < cols; xx++) {
+      if ((xx + yy) % 2 == 0) continue;
+      // 末行/末列裁剪到格子边界。
+      final w = math.min(sq, cell - xx * sq).clamp(0.0, sq);
+      final h = math.min(sq, cell - yy * sq).clamp(0.0, sq);
+      if (w <= 0 || h <= 0) continue;
+      canvas.drawRect(
+        Rect.fromLTWH(px + xx * sq, py + yy * sq, w, h),
+        checker,
+      );
+    }
   }
 }

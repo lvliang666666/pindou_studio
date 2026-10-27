@@ -53,7 +53,7 @@ void main() {
       expect(result.placements.first.$1, 0); // 列 0
       expect(result.placements.first.$2, 0); // 行 0
       // 全部为红色系（纯红图）。
-      expect(result.pattern.cells.every((c) => c.red > c.green), isTrue);
+      expect(result.pattern.cells.every((c) => c!.red > c.green), isTrue);
     });
 
     test('两张同尺寸图横排：总宽翻倍', () {
@@ -68,8 +68,8 @@ void main() {
       expect(result.pattern.height, 10);
       expect(result.placements.length, 2);
       // 左边是红、右边是蓝。
-      expect(result.pattern.cellAt(0, 0).red, greaterThan(100));
-      expect(result.pattern.cellAt(39, 0).blue, greaterThan(100));
+      expect(result.pattern.cellAt(0, 0)!.red, greaterThan(100));
+      expect(result.pattern.cellAt(39, 0)!.blue, greaterThan(100));
     });
 
     test('两张图竖排（columns=1）：总高翻倍', () {
@@ -82,8 +82,8 @@ void main() {
       );
       expect(result.pattern.width, 20);
       expect(result.pattern.height, 20);
-      expect(result.pattern.cellAt(0, 0).red, greaterThan(100));
-      expect(result.pattern.cellAt(0, 19).blue, greaterThan(100));
+      expect(result.pattern.cellAt(0, 0)!.red, greaterThan(100));
+      expect(result.pattern.cellAt(0, 19)!.blue, greaterThan(100));
     });
 
     test('不同尺寸子图：pad 到统一尺寸且居中', () {
@@ -116,13 +116,13 @@ void main() {
       expect(result.pattern.height, 20);
       // A 区域顶部（pad 区）应为填充色（通用卡首色 A1 白色）。
       final filler = BeadPalette.colors.first;
-      expect(result.pattern.cellAt(0, 0).code, filler.code);
+      expect(result.pattern.cellAt(0, 0)!.code, filler.code);
       // A 区域中心应为红色系。
-      expect(result.pattern.cellAt(10, 10).red, greaterThan(100));
+      expect(result.pattern.cellAt(10, 10)!.red, greaterThan(100));
       // B 区域（第二张，列 1）左侧 pad 为填充色。
-      expect(result.pattern.cellAt(20, 10).code, filler.code);
+      expect(result.pattern.cellAt(20, 10)!.code, filler.code);
       // B 中心为蓝色系。
-      expect(result.pattern.cellAt(30, 10).blue, greaterThan(100));
+      expect(result.pattern.cellAt(30, 10)!.blue, greaterThan(100));
     });
 
     test('三张图 columns=2：2x2 网格，末行右侧留空', () {
@@ -142,9 +142,9 @@ void main() {
       expect(result.placements[2].$2, 1);
       // 右下角（第二行第二列）为空白填充色。
       final filler = BeadPalette.colors.first;
-      expect(result.pattern.cellAt(15, 15).code, filler.code);
+      expect(result.pattern.cellAt(15, 15)!.code, filler.code);
       // 第二行第一列中心为蓝色系。
-      expect(result.pattern.cellAt(5, 15).blue, greaterThan(100));
+      expect(result.pattern.cellAt(5, 15)!.blue, greaterThan(100));
     });
 
     test('counts 统计正确：总豆数 = 总格子数', () {
@@ -198,7 +198,7 @@ void main() {
         ),
       );
       // A 顶部 pad 区应为黑色。
-      expect(result.pattern.cellAt(0, 0).code, black.code);
+      expect(result.pattern.cellAt(0, 0)!.code, black.code);
     });
 
     test('转换参数透传：colorLimit 生效', () {

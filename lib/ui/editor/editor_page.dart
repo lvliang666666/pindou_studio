@@ -1046,33 +1046,44 @@ class _EditorPageState extends State<EditorPage> {
   // ---------- 手动编辑 ----------
 
   /// 画笔涂色：有画笔时直接涂，无画笔时弹选色框。
-  /// 返回实际应用的颜色（供画布叠加层即时显示）；无变化为 null。
-  BeadColor? _paintCell(EditorState state, int x, int y) {
+  /// 返回 (是否有变化, 新内容)（供画布叠加层即时显示）。
+  (bool, BeadColor?) _paintCell(EditorState state, int x, int y) {
     final code = state.brushCode;
     if (code == null) {
       _showColorPicker(state, x, y);
-      return null;
+      return (false, null);
     }
     final bead = BeadPalette.byCode[code];
-    if (bead == null) return null;
+    if (bead == null) return (false, null);
     return state.paintCell(x, y, bead);
   }
 
   /// 弹出选色面板：已用颜色优先，其余按色系分组展示。
+  /// 返回空串 = 擦成空格（不放豆）；null = 取消。
   Future<void> _showColorPicker(EditorState state, int x, int y) async {
     final pattern = state.pattern;
     if (pattern == null) return;
     final current = pattern.cellAt(x, y);
+    final currentDesc = current == null
+        ? '空格（不放豆）'
+        : '${current.code} ${current.name}';
 
-    final selected = await showDialog<BeadColor>(
+    final selected = await showDialog<Object>(
       context: context,
       builder: (context) => _ColorPickerDialog(
-        title: '替换 ($x, $y) 颜色，当前：${current.code} ${current.name}',
+        title: '替换 ($x, $y) 颜色，当前：$currentDesc',
         usedColors: [for (final bc in pattern.counts) bc.color],
-        currentCode: current.code,
+        currentCode: current?.code ?? '',
+        allowEmpty: true,
       ),
     );
-    if (selected != null) {
+    if (selected == null || !mounted) return;
+    if (selected is String && selected.isEmpty) {
+      // 擦成空格。
+      state.eraseToEmpty(x, y);
+      return;
+    }
+    if (selected is BeadColor) {
       state.editCell(x, y, selected);
     }
   }
@@ -1221,16 +1232,19 @@ class _EditorPageState extends State<EditorPage> {
 
 
 /// 选色对话框：已用颜色 + 全色卡（按色系分组）。
+/// [allowEmpty] 时顶部提供「擦成空格」选项（返回空字符串）。
 class _ColorPickerDialog extends StatelessWidget {
   const _ColorPickerDialog({
     required this.title,
     required this.usedColors,
     required this.currentCode,
+    this.allowEmpty = false,
   });
 
   final String title;
   final List<BeadColor> usedColors;
   final String currentCode;
+  final bool allowEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -1265,6 +1279,15 @@ class _ColorPickerDialog extends StatelessWidget {
               Expanded(
                 child: ListView(
                   children: [
+                    if (allowEmpty && currentCode.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).pop(''),
+                          icon: const Icon(Icons.grid_off, size: 18),
+                          label: const Text('擦成空格（不放豆）'),
+                        ),
+                      ),
                     _section(context, '当前图纸使用的颜色', usedColors),
                     for (final entry in unusedGroups.entries)
                       _section(context, entry.key, entry.value),
