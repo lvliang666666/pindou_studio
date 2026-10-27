@@ -1079,15 +1079,15 @@ class _EditorPageState extends State<EditorPage> {
   // ---------- 手动编辑 ----------
 
   /// 画笔涂色：有画笔时直接涂，无画笔时弹选色框。
-  /// 返回实际应用的颜色（供画布叠加层即时显示）；无变化为 null。
-  BeadColor? _paintCell(EditorState state, int x, int y) {
+  /// 返回 (是否有变化, 新内容)（供画布叠加层即时显示）。
+  (bool, BeadColor?) _paintCell(EditorState state, int x, int y) {
     final code = state.brushCode;
     if (code == null) {
       _showColorPicker(state, x, y);
-      return null;
+      return (false, null);
     }
     final bead = BeadPalette.byCode[code];
-    if (bead == null) return null;
+    if (bead == null) return (false, null);
     return state.paintCell(x, y, bead);
   }
 

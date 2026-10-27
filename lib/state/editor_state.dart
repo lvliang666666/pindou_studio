@@ -300,12 +300,13 @@ class EditorState extends ChangeNotifier {
   }
 
   /// 手动替换某格颜色（按色号），并更新统计。单独一步，可撤销。
-  /// 返回实际应用的颜色；格子无变化时返回 null。
-  BeadColor? editCell(int x, int y, BeadColor color) => paintCell(x, y, color);
+  /// 返回 (是否有变化, 新内容)。
+  (bool, BeadColor?) editCell(int x, int y, BeadColor color) =>
+      paintCell(x, y, color);
 
   /// 画笔涂色：笔画内（beginStroke/endStroke 之间）连续涂色合并为一步撤销。
-  /// 返回实际应用的颜色；格子无变化时返回 null。
-  BeadColor? paintCell(int x, int y, BeadColor color) {
+  /// 返回 (是否有变化, 新内容)。
+  (bool, BeadColor?) paintCell(int x, int y, BeadColor color) {
     return _applyCellEdit(x, y, color.code);
   }
 
@@ -313,43 +314,43 @@ class EditorState extends ChangeNotifier {
   /// - 格子有手动编辑时，恢复为自动转换色（撤销误涂）；
   /// - 格子是自动转换色（无编辑记录）时，擦成空格（手动抠背景兜底，
   ///   清除自动转换残留的边缘豆子）。
-  /// 返回恢复/应用后的颜色；擦成空格返回 null（画布通过对比格子
-  /// 前后内容感知变化，不依赖返回值）。
-  BeadColor? eraseCell(int x, int y) {
+  /// 返回 (是否有变化, 新内容)：新内容 null = 该格变为空格。
+  (bool, BeadColor?) eraseCell(int x, int y) {
     final auto = _autoCodes['$x,$y'];
     if (auto != null && auto.isNotEmpty) {
       return _applyCellEdit(x, y, auto);
     }
     // 无手动编辑（或自动色本就是空格）：擦成空格。
-    eraseToEmpty(x, y);
-    return null;
+    return eraseToEmpty(x, y);
   }
 
   /// 擦成空格（不放豆）：手动抠背景的兜底操作。
-  /// 返回 null（空格无颜色对象）；实际应用结果通过 pattern 更新体现。
-  BeadColor? eraseToEmpty(int x, int y) {
+  /// 返回 (是否有变化, 新内容)：新内容 null = 空格。
+  (bool, BeadColor?) eraseToEmpty(int x, int y) {
     return _applyCellEdit(x, y, emptyCellCode);
   }
 
-  /// 应用单格编辑，返回实际写入的颜色；无变化时返回 null。
-  /// [code] 为空字符串时表示擦成空格（不放豆）。
-  BeadColor? _applyCellEdit(int x, int y, String code) {
+  /// 应用单格编辑，返回 (是否有变化, 新内容)。
+  /// [code] 为空字符串时表示擦成空格（不放豆），新内容为 null。
+  (bool, BeadColor?) _applyCellEdit(int x, int y, String code) {
     final p = pattern;
-    if (p == null) return null;
+    if (p == null) return (false, null);
     final BeadColor? bead;
     if (code.isEmpty) {
       bead = null; // 空格
     } else {
       bead = BeadPalette.byCode[code];
-      if (bead == null) return null;
+      if (bead == null) return (false, null);
     }
-    if (x < 0 || x >= p.width || y < 0 || y >= p.height) return null;
+    if (x < 0 || x >= p.width || y < 0 || y >= p.height) {
+      return (false, null);
+    }
     final idx = y * p.width + x;
     // "当前值"判断：笔画中用可变副本（pattern.cells 是笔画开始时的
     // 旧内容——同一笔画内"涂走再涂回/擦回原色"时，旧列表恰好等于
     // 目标色，用它判断会把真实编辑误判为无变化而跳过）。
     final current = _currentStroke != null ? _mutableCells![idx] : p.cells[idx];
-    if (current?.code == code) return null;
+    if (current?.code == code) return (false, bead);
 
     final key = '$x,$y';
     final oldCode = current?.code ?? '';
@@ -391,7 +392,7 @@ class EditorState extends ChangeNotifier {
       _pushUndo(_Stroke()..edits.add(_CellEdit(x, y, oldCode, code)));
       _markDirtyAndNotify();
     }
-    return bead;
+    return (true, bead);
   }
 
   /// 擦成空格（抠背景手动兜底）：该格不放豆。返回 null 表示已应用

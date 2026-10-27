@@ -42,11 +42,12 @@ class PatternCanvas extends StatefulWidget {
   final String? brushCode;
 
   /// 画笔涂到某格（笔画过程中连续回调）。
-  /// 返回实际应用的颜色（格子无变化为 null），供叠加层即时显示。
-  final BeadColor? Function(int x, int y)? onPaintCell;
+  /// 返回 (是否有变化, 新内容)：新内容 null = 该格变为空格。
+  final (bool, BeadColor?) Function(int x, int y)? onPaintCell;
 
-  /// 右键擦除某格（恢复自动转换色）。返回恢复后的颜色，无编辑记录为 null。
-  final BeadColor? Function(int x, int y)? onEraseCell;
+  /// 右键擦除某格（恢复自动转换色或擦成空格）。
+  /// 返回 (是否有变化, 新内容)：新内容 null = 该格变为空格。
+  final (bool, BeadColor?) Function(int x, int y)? onEraseCell;
 
   /// 笔画开始/结束（用于把一次拖动合并为一步撤销）。
   final VoidCallback? onStrokeStart;
@@ -497,21 +498,14 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _paintAt(int x, int y) {
-    // 回调同步更新 pattern.cells；通过对比回调前后的格子内容判断
-    // 是否真的变化（回调返回值无法表达"擦成空格"——空格没有颜色对象）。
-    // 无变化（同色重复涂/擦空格）不记脏格子。
-    final p = widget.pattern;
-    if (p == null) return;
-    final before = p.cellAt(x, y);
-    if (_erasing) {
-      widget.onEraseCell?.call(x, y);
-    } else {
-      widget.onPaintCell?.call(x, y);
-    }
-    final after = p.cellAt(x, y);
-    if (identical(before, after)) return;
-    if (before != null && after != null && before.code == after.code) return;
-    _dirtyCells.add((x, y, after));
+    // 回调返回 (是否有变化, 新内容)。笔画中 pattern.cells 是旧内容
+    // （快速路径写可变副本，endStroke 才重建），不能靠读 pattern
+    // 判断变化——必须由状态层明确告知。
+    final r = _erasing
+        ? widget.onEraseCell?.call(x, y)
+        : widget.onPaintCell?.call(x, y);
+    if (r == null || !r.$1) return;
+    _dirtyCells.add((x, y, r.$2));
     _overlayVersion.value++;
   }
 
