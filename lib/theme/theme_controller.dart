@@ -23,6 +23,9 @@ class AppSettings extends ChangeNotifier {
   String _paletteId = 'default';
   int _boardSize = 50;
 
+  /// 单豆物理边长（mm）：底板显示模式下换算底板实际尺寸。
+  double _beadSize = 5.0;
+
   /// 当前主题。
   PindouTheme get theme => _theme;
 
@@ -31,6 +34,9 @@ class AppSettings extends ChangeNotifier {
 
   /// 底板尺寸（正方形边长，豆数）。最小 50，最大 200。
   int get boardSize => _boardSize;
+
+  /// 单豆物理边长（mm）。最小 2.5，最大 10。
+  double get beadSize => _beadSize;
 
   File? _settingsFile;
 
@@ -80,6 +86,14 @@ class AppSettings extends ChangeNotifier {
           changed = true;
         }
       }
+      final bd = json['beadSize'];
+      if (bd is num && bd >= 2.5 && bd <= 10) {
+        final v = bd.toDouble();
+        if (_beadSize != v) {
+          _beadSize = v;
+          changed = true;
+        }
+      }
       if (changed) notifyListeners();
     } catch (_) {
       // 坏 JSON / 无权限等：保持默认设置。
@@ -114,6 +128,16 @@ class AppSettings extends ChangeNotifier {
     await _persist();
   }
 
+  /// 更新单豆物理边长（mm）：立即生效并异步落盘。
+  /// [size] 限制在 2.5~10。
+  Future<void> setBeadSize(double size) async {
+    final s = size.clamp(2.5, 10.0);
+    if (_beadSize == s) return;
+    _beadSize = s;
+    notifyListeners();
+    await _persist();
+  }
+
   Future<void> _persist() async {
     try {
       final file = await _ensureFile();
@@ -122,6 +146,7 @@ class AppSettings extends ChangeNotifier {
           'themeId': _theme.id,
           'paletteId': _paletteId,
           'boardSize': _boardSize,
+          'beadSize': _beadSize,
         }),
       );
     } catch (_) {

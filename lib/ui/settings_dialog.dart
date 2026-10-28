@@ -147,6 +147,29 @@ class _SettingsDialog extends StatelessWidget {
                   ],
                 ),
               ),
+              const SizedBox(height: 12),
+              // 单豆物理边长（mm）：底板实际尺寸 = 边长 x 单豆边长。
+              ListenableBuilder(
+                listenable: settings,
+                builder: (context, _) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '单豆边长：${settings.beadSize.toStringAsFixed(1)} mm'
+                      '（底板实际 ${(settings.boardSize * settings.beadSize / 10).toStringAsFixed(1)} cm）',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    Slider(
+                      value: settings.beadSize,
+                      min: 2.5,
+                      max: 10,
+                      divisions: 15,
+                      label: '${settings.beadSize.toStringAsFixed(1)} mm',
+                      onChanged: (v) => settings.setBeadSize(v),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerRight,

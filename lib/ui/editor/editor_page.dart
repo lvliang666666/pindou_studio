@@ -438,6 +438,7 @@ class _EditorPageState extends State<EditorPage> {
             colors: canvasColors,
             showGrid: _showGrid,
             boardSize: widget.settings.boardSize,
+            showBoard: state.showBoard,
             brushCode: state.brushCode,
             onPaintCell: (x, y) => _paintCell(state, x, y),
             onEraseCell: (x, y) => state.eraseCell(x, y),
@@ -792,6 +793,27 @@ class _EditorPageState extends State<EditorPage> {
               title: const Text('显示网格线'),
               value: _showGrid,
               onChanged: (v) => setState(() => _showGrid = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('显示底板'),
+              subtitle: Text(
+                state.showBoard
+                    ? '底板 ${widget.settings.boardSize}x${widget.settings.boardSize}'
+                        '（${(widget.settings.boardSize * widget.settings.beadSize / 10).toStringAsFixed(1)} cm），'
+                        '拼豆不可超出'
+                    : '开启后显示实体底板，拼豆超出自动缩回',
+                style: const TextStyle(fontSize: 12),
+              ),
+              value: state.showBoard,
+              onChanged: (v) {
+                final msg = state.setShowBoard(v);
+                if (msg != null && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(msg)),
+                  );
+                }
+              },
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
