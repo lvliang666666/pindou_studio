@@ -23,9 +23,18 @@ export '../core/palette.dart' show BeadColor, BeadPalette;
 class EditorState extends ChangeNotifier {
   EditorState({ProjectRepository? repository})
       : repository = repository ?? ProjectRepository() {
-    // 默认参数：29x29 标准底板。
-    gridWidthCtrl.text = '29';
-    gridHeightCtrl.text = '29';
+    // 默认参数：跟随底板尺寸（AppSettings 加载后经 syncDefaultGridSize 同步）。
+    gridWidthCtrl.text = '$_defaultGridSize';
+    gridHeightCtrl.text = '$_defaultGridSize';
+  }
+
+  /// 默认图纸尺寸（豆数）：跟随底板尺寸，AppSettings 加载后同步。
+  /// 静态：所有 EditorState 实例共享同一默认值。
+  static int _defaultGridSize = 50;
+
+  /// 底板尺寸变化后同步默认图纸尺寸（仅影响空编辑器/新建项目）。
+  static void syncDefaultGridSize(int boardSize) {
+    if (boardSize >= 1) _defaultGridSize = boardSize;
   }
 
   /// 项目仓库。
@@ -824,8 +833,8 @@ class EditorState extends ChangeNotifier {
     colorLimit = 0;
     BeadPalette.setActive('default');
     paletteId = 'default';
-    gridWidthCtrl.text = '29';
-    gridHeightCtrl.text = '29';
+    gridWidthCtrl.text = '$_defaultGridSize';
+    gridHeightCtrl.text = '$_defaultGridSize';
     _undoStack.clear();
     _redoStack.clear();
     _currentStroke = null;

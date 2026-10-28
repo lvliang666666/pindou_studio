@@ -765,12 +765,15 @@ class _EditorPageState extends State<EditorPage> {
             Wrap(
               spacing: 6,
               children: [
-                for (final preset in const [29, 58, 87])
+                // 预设按底板正方形扩充：1 板 / 2x2 板 / 3x3 板。
+                for (final n in const [1, 2, 3])
                   ActionChip(
-                    label: Text('$preset'),
+                    label: Text(
+                        '${widget.settings.boardSize * n}（${n == 1 ? "1" : "$n×$n"} 板）'),
                     onPressed: () {
-                      state.gridWidthCtrl.text = '$preset';
-                      state.gridHeightCtrl.text = '$preset';
+                      final size = widget.settings.boardSize * n;
+                      state.gridWidthCtrl.text = '$size';
+                      state.gridHeightCtrl.text = '$size';
                       state.confirmGridSize();
                     },
                   ),

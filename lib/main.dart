@@ -24,7 +24,10 @@ class _PindouStudioAppState extends State<PindouStudioApp> {
     super.initState();
     _settings = AppSettings();
     // 异步读取持久化设置：首帧先以默认渲染，读完后通知重建。
-    _settings.load();
+    // 底板尺寸同步为默认图纸尺寸（空编辑器/新建项目用）。
+    _settings.load().then((_) {
+      EditorState.syncDefaultGridSize(_settings.boardSize);
+    });
   }
 
   @override
