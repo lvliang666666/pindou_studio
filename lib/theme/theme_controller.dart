@@ -21,7 +21,7 @@ class AppSettings extends ChangeNotifier {
 
   PindouTheme _theme = pindouThemeById('default');
   String _paletteId = 'default';
-  int _boardSize = 29;
+  int _boardSize = 50;
 
   /// 当前主题。
   PindouTheme get theme => _theme;
@@ -29,7 +29,7 @@ class AppSettings extends ChangeNotifier {
   /// 当前色卡 id。
   String get paletteId => _paletteId;
 
-  /// 底板尺寸（正方形边长，豆数）。最小 29（兼容历史），常用 50。
+  /// 底板尺寸（正方形边长，豆数）。最小 50，最大 200。
   int get boardSize => _boardSize;
 
   File? _settingsFile;
@@ -74,7 +74,7 @@ class AppSettings extends ChangeNotifier {
         }
       }
       final bs = json['boardSize'];
-      if (bs is int && bs >= 29 && bs <= 200) {
+      if (bs is int && bs >= 50 && bs <= 200) {
         if (_boardSize != bs) {
           _boardSize = bs;
           changed = true;
@@ -105,9 +105,9 @@ class AppSettings extends ChangeNotifier {
   }
 
   /// 更新底板尺寸：立即生效并异步落盘。
-  /// [size] 限制在 29~200（正方形边长，豆数）。
+  /// [size] 限制在 50~200（正方形边长，豆数，最小 50）。
   Future<void> setBoardSize(int size) async {
-    final s = size.clamp(29, 200);
+    final s = size.clamp(50, 200);
     if (_boardSize == s) return;
     _boardSize = s;
     notifyListeners();

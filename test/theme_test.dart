@@ -90,16 +90,16 @@ void main() {
       expect(settings2.boardSize, 50);
     });
 
-    test('boardSize 越界值被钳制（29~200）', () async {
+    test('boardSize 越界值被钳制（50~200）', () async {
       final settings = AppSettings(storageRoot: tempDir);
       addTearDown(settings.dispose);
       await settings.setBoardSize(10);
-      expect(settings.boardSize, 29);
+      expect(settings.boardSize, 50);
       await settings.setBoardSize(500);
       expect(settings.boardSize, 200);
     });
 
-    test('boardSize 缺失时回退 29', () async {
+    test('boardSize 缺失时回退 50', () async {
       final dir = Directory(
           '${tempDir.path}${Platform.pathSeparator}PindouStudio')
         ..createSync(recursive: true);
@@ -108,7 +108,7 @@ void main() {
       final settings = AppSettings(storageRoot: tempDir);
       addTearDown(settings.dispose);
       await settings.load();
-      expect(settings.boardSize, 29);
+      expect(settings.boardSize, 50);
     });
 
     test('坏 JSON 回退默认主题', () async {

@@ -24,7 +24,7 @@ class _SettingsDialog extends StatelessWidget {
   final _boardCtrl = TextEditingController();
 
   static String? _boardError(int current) {
-    if (current < 29 || current > 200) return '需在 29 ~ 200 之间';
+    if (current < 50 || current > 200) return '需在 50 ~ 200 之间';
     return null;
   }
 
@@ -108,7 +108,7 @@ class _SettingsDialog extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (final preset in const [29, 50, 58, 87])
+                    for (final preset in const [50, 60, 70, 80, 90, 100])
                       ChoiceChip(
                         label: Text('$preset x $preset'),
                         selected: settings.boardSize == preset,
@@ -135,14 +135,14 @@ class _SettingsDialog extends StatelessWidget {
                         controller: _boardCtrl,
                         onSubmitted: (v) {
                           final n = int.tryParse(v);
-                          if (n != null && n >= 29 && n <= 200) {
+                          if (n != null && n >= 50 && n <= 200) {
                             settings.setBoardSize(n);
                           }
                         },
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text('29 ~ 200（最小 29 兼容历史）',
+                    Text('50 ~ 200（最小 50）',
                         style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
