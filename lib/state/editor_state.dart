@@ -225,6 +225,15 @@ class EditorState extends ChangeNotifier {
   /// 底板尺寸（豆数）：由设置页同步（AppSettings.boardSize）。
   int boardSize = 50;
 
+  /// 图纸在底板上的偏移（格子数）：底板显示时图纸可拖动摆放，
+  /// (0,0) = 左上角对齐。非底板模式恒为 0。
+  int boardOffsetX = 0;
+  int boardOffsetY = 0;
+
+  /// 图纸在底板上的最大偏移（底板尺寸 - 图纸尺寸，最小 0）。
+  int get maxBoardOffsetX => math.max(0, boardSize - (pattern?.width ?? 0));
+  int get maxBoardOffsetY => math.max(0, boardSize - (pattern?.height ?? 0));
+
   /// 切换底板显示。开启时若图纸超出底板，自动缩回并提示。
   /// 返回提示文案（null = 无需提示）。
   String? setShowBoard(bool v) {
@@ -234,6 +243,7 @@ class EditorState extends ChangeNotifier {
       return null;
     }
     final msg = _shrinkToBoard();
+    _clampBoardOffset();
     notifyListeners();
     return msg;
   }
@@ -248,8 +258,29 @@ class EditorState extends ChangeNotifier {
       return null;
     }
     final msg = _shrinkToBoard();
+    _clampBoardOffset();
     notifyListeners();
     return msg;
+  }
+
+  /// 偏移越界时收回底板范围内。
+  void _clampBoardOffset() {
+    boardOffsetX = boardOffsetX.clamp(0, maxBoardOffsetX);
+    boardOffsetY = boardOffsetY.clamp(0, maxBoardOffsetY);
+  }
+
+  /// 移动图纸在底板上的位置（格子数增量）。返回是否移动。
+  /// 底板未显示或无图纸时不移动；越界自动钳制在底板内。
+  bool movePatternOnBoard(int dx, int dy) {
+    if (!showBoard || pattern == null) return false;
+    if (dx == 0 && dy == 0) return false;
+    final nx = (boardOffsetX + dx).clamp(0, maxBoardOffsetX);
+    final ny = (boardOffsetY + dy).clamp(0, maxBoardOffsetY);
+    if (nx == boardOffsetX && ny == boardOffsetY) return false;
+    boardOffsetX = nx;
+    boardOffsetY = ny;
+    notifyListeners();
+    return true;
   }
 
   /// 图纸超出底板时按比例缩小到恰好放进底板（居中留空）。

@@ -19,6 +19,9 @@ class PatternCanvas extends StatefulWidget {
     this.boardSize = 29,
     this.showBoard = false,
     this.partitionSize = 10,
+    this.boardOffsetX = 0,
+    this.boardOffsetY = 0,
+    this.onMovePattern,
     this.onCellTap,
     this.brushCode,
     this.onPaintCell,
@@ -46,6 +49,13 @@ class PatternCanvas extends StatefulWidget {
 
   /// 底板分区尺寸（豆数）：每 N 颗豆一条分界线。
   final int partitionSize;
+
+  /// 图纸在底板上的偏移（格子数）：底板显示时图纸摆放位置。
+  final int boardOffsetX;
+  final int boardOffsetY;
+
+  /// 拖动图纸在底板上移动（格子数增量）。null = 不支持移动。
+  final bool Function(int dx, int dy)? onMovePattern;
 
   /// 点击格子回调（未启用画笔时），参数为格子坐标 (x, y)。
   final void Function(int x, int y)? onCellTap;
@@ -186,6 +196,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
             widget.boardSize != _rasterBoardSize ||
             widget.showBoard != _rasterShowBoard ||
             widget.partitionSize != _rasterPartitionSize ||
+            widget.boardOffsetX != _rasterOffX ||
+            widget.boardOffsetY != _rasterOffY ||
             widget.colors != _rasterColors)) {
       _scheduleRasterizeAfterFrame();
     }
@@ -225,11 +237,11 @@ class _PatternCanvasState extends State<PatternCanvas> {
     try {
       // 2x 超采样：放大到 200% 仍清晰。
       const ss = 2.0;
-      // 底板显示时位图覆盖底板区域（图纸居中于底板，四周露出底板）。
+      // 底板显示时位图覆盖底板区域，图纸按用户摆放偏移放置。
       final boardW = widget.showBoard ? math.max(p.width, widget.boardSize) : p.width;
       final boardH = widget.showBoard ? math.max(p.height, widget.boardSize) : p.height;
-      final offX = (boardW - p.width) ~/ 2;
-      final offY = (boardH - p.height) ~/ 2;
+      final offX = widget.showBoard ? widget.boardOffsetX : 0;
+      final offY = widget.showBoard ? widget.boardOffsetY : 0;
       final w = (boardW * _baseCell * ss).round();
       final h = (boardH * _baseCell * ss).round();
       if (w <= 0 || h <= 0) return;
@@ -405,6 +417,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
           boardW: boardW,
           boardH: boardH,
           partitionSize: widget.partitionSize,
+          patternOffsetX: offX,
+          patternOffsetY: offY,
         ).paint(canvas, Size(w.toDouble(), h.toDouble()));
       }
       final picture = recorder.endRecording();
@@ -458,6 +472,21 @@ class _PatternCanvasState extends State<PatternCanvas> {
 
   // ===== 右键擦除（raw pointer）：pan 手势只响应左键，右键需自行处理 =====
 
+  /// 拖动移动图纸：底板模式下从底板空白处（图纸外）按下拖动。
+  /// 记录起点（非 null = 拖动中），移动时按格子增量回调。
+  int? _dragStartX;
+  int? _dragLastBoardX;
+  int? _dragLastBoardY;
+
+  /// 底板坐标（含偏移，可为负/超界）-> 格子坐标；图纸外返回 null 但仍给出原始值。
+  (int, int) _boardCellAt(Offset localPos) {
+    const eps = 1e-6;
+    return (
+      (localPos.dx / _baseCell + eps).floor() - _rasterOffX,
+      (localPos.dy / _baseCell + eps).floor() - _rasterOffY,
+    );
+  }
+
   /// 右键按下：开始擦除笔画。
   void _handleRightDown(PointerDownEvent e) {
     if (widget.brushCode == null) return;
@@ -503,6 +532,17 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _handlePanStart(DragStartDetails details) {
+    // 底板模式：从图纸外（底板空白处）按下 = 开始拖动移动图纸。
+    if (widget.showBoard && widget.onMovePattern != null) {
+      final cell = _cellAt(details.localPosition);
+      if (cell == null) {
+        final (bx, by) = _boardCellAt(details.localPosition);
+        _dragStartX = bx;
+        _dragLastBoardX = bx;
+        _dragLastBoardY = by;
+        return;
+      }
+    }
     final cell = _cellAt(details.localPosition);
     if (cell == null) return;
     widget.onStrokeStart?.call();
@@ -515,6 +555,18 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _handlePanUpdate(DragUpdateDetails details) {
+    // 拖动移动图纸中：按格子增量回调移动。
+    if (_dragStartX != null) {
+      final (bx, by) = _boardCellAt(details.localPosition);
+      final dx = bx - (_dragLastBoardX ?? bx);
+      final dy = by - (_dragLastBoardY ?? by);
+      if (dx != 0 || dy != 0) {
+        widget.onMovePattern?.call(dx, dy);
+        _dragLastBoardX = bx;
+        _dragLastBoardY = by;
+      }
+      return;
+    }
     if (!_painting) return;
     final cell = _cellAt(details.localPosition);
     if (cell == null) return;
@@ -529,6 +581,13 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _handlePanEnd(DragEndDetails details) {
+    // 结束拖动移动。
+    if (_dragStartX != null) {
+      _dragStartX = null;
+      _dragLastBoardX = null;
+      _dragLastBoardY = null;
+      return;
+    }
     if (_painting) {
       _painting = false;
       _lastCellX = null;
@@ -684,6 +743,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
                                     ? math.max(pattern.height, widget.boardSize)
                                     : pattern.height,
                                 partitionSize: widget.partitionSize,
+                                patternOffsetX: widget.boardOffsetX,
+                                patternOffsetY: widget.boardOffsetY,
                               )
                             : null,
                         cell: _baseCell,
@@ -850,6 +911,8 @@ class _PatternPainter extends CustomPainter {
     this.boardW,
     this.boardH,
     this.partitionSize = 10,
+    this.patternOffsetX = 0,
+    this.patternOffsetY = 0,
   });
 
   final BeadPattern pattern;
@@ -869,6 +932,10 @@ class _PatternPainter extends CustomPainter {
   /// 底板分区尺寸（豆数）：每 N 颗豆一条分界线。
   final int partitionSize;
 
+  /// 图纸在底板上的偏移（格子数）：showBoard 时由调用方传入。
+  final int patternOffsetX;
+  final int patternOffsetY;
+
   /// 标尺文字跨帧缓存：(文本, 格子尺寸) -> 已排版 TextPainter。
   /// 主题切换时清空（文字颜色变了，缓存的排版结果作废）。
   static final Map<(String, double), TextPainter> _rulerTextCache = {};
@@ -877,18 +944,35 @@ class _PatternPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final fillPaint = Paint()..style = PaintingStyle.fill;
 
-    // 底板显示：先铺白色实体底板（含边缘描边），图纸居中其上。
+    // 底板显示：先铺白色实体底板（含边缘描边），图纸按偏移摆放。
     final bw = boardW ?? pattern.width;
     final bh = boardH ?? pattern.height;
-    final offX = (bw - pattern.width) ~/ 2;
-    final offY = (bh - pattern.height) ~/ 2;
+    final offX = showBoard ? patternOffsetX : 0;
+    final offY = showBoard ? patternOffsetY : 0;
     if (showBoard) {
+      // 白色实体底板。
       canvas.drawRect(
         Rect.fromLTWH(0, 0, bw * cell, bh * cell),
         Paint()..color = colors.boardSurface,
       );
-      // 底板分区线：每 partitionSize 豆一条分界（比普通网格粗），
-      // 覆盖整个底板区域（含图纸下方），模拟实体底板分区。
+      // 底板格线（淡）：每格一条，与分区线区分。
+      final faintPath = Path();
+      for (int x = 1; x < bw; x++) {
+        faintPath.moveTo(x * cell, 0);
+        faintPath.lineTo(x * cell, bh * cell);
+      }
+      for (int y = 1; y < bh; y += 1) {
+        faintPath.moveTo(0, y * cell);
+        faintPath.lineTo(bw * cell, y * cell);
+      }
+      canvas.drawPath(
+        faintPath,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = colors.boardGrid,
+      );
+      // 底板分区线（深）：每 partitionSize 豆一条，模拟实体底板分区。
       final ps = partitionSize.clamp(1, math.max(bw, bh)).toInt();
       final partPath = Path();
       for (int x = ps; x < bw; x += ps) {
@@ -913,6 +997,44 @@ class _PatternPainter extends CustomPainter {
           ..strokeWidth = 2
           ..color = colors.boardEdge,
       );
+      // 分区坐标：沿底板顶部与左侧标注分区序号（1 起）。
+      if (showRuler && cell >= 10) {
+        final labelStyle = TextStyle(
+          color: colors.rulerText,
+          fontSize: cell * 0.42,
+          fontWeight: FontWeight.w600,
+        );
+        final rulerCache = _rulerTextCache;
+        void drawLabel(String text, Offset center) {
+          final key = (text, cell);
+          var tp = rulerCache[key];
+          if (tp == null) {
+            tp = TextPainter(textDirection: TextDirection.ltr)
+              ..text = TextSpan(text: text, style: labelStyle)
+              ..layout();
+            rulerCache[key] = tp;
+          }
+          tp.paint(
+            canvas,
+            Offset(
+              center.dx - tp.width / 2,
+              center.dy - tp.height / 2,
+            ),
+          );
+        }
+
+        final cols = (bw + ps - 1) ~/ ps;
+        final rows = (bh + ps - 1) ~/ ps;
+        for (int i = 0; i < cols; i++) {
+          // 分区中心 x 坐标（末列可能不满 ps）。
+          final cx = (i * ps + (math.min(ps, bw - i * ps)) / 2) * cell;
+          drawLabel('${i + 1}', Offset(cx, -cell * 0.7));
+        }
+        for (int i = 0; i < rows; i++) {
+          final cy = (i * ps + (math.min(ps, bh - i * ps)) / 2) * cell;
+          drawLabel('${i + 1}', Offset(-cell * 0.7, cy));
+        }
+      }
       // 图纸区域平移到居中位置（后续所有绘制都在图纸坐标系内）。
       canvas.translate(offX * cell, offY * cell);
     }
@@ -1077,7 +1199,9 @@ class _PatternPainter extends CustomPainter {
         oldDelegate.showBoard != showBoard ||
         oldDelegate.boardW != boardW ||
         oldDelegate.boardH != boardH ||
-        oldDelegate.partitionSize != partitionSize;
+        oldDelegate.partitionSize != partitionSize ||
+        oldDelegate.patternOffsetX != patternOffsetX ||
+        oldDelegate.patternOffsetY != patternOffsetY;
   }
 }
 
