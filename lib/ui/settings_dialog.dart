@@ -28,6 +28,13 @@ class _SettingsDialog extends StatelessWidget {
     return null;
   }
 
+  /// 分区数：底板边长 ÷ 分区尺寸（向上取整，余数并入最后区域）。
+  static int _partitionCount(AppSettings settings) {
+    final p = settings.partitionSize;
+    return ((settings.boardSize + p - 1) ~/ p) *
+        ((settings.boardSize + p - 1) ~/ p);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -148,24 +155,33 @@ class _SettingsDialog extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              // 单豆物理边长（mm）：底板实际尺寸 = 边长 x 单豆边长。
+              // 底板分区尺寸：底板内每 N 颗豆一条分界线（5 的倍数）。
               ListenableBuilder(
                 listenable: settings,
                 builder: (context, _) => Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '单豆边长：${settings.beadSize.toStringAsFixed(1)} mm'
-                      '（底板实际 ${(settings.boardSize * settings.beadSize / 10).toStringAsFixed(1)} cm）',
+                      '底板分区：每 ${settings.partitionSize} 豆一格'
+                      '（${settings.boardSize ~/ settings.partitionSize}x${settings.boardSize ~/ settings.partitionSize}'
+                      ' = ${_partitionCount(settings)} 个区域）',
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
-                    Slider(
-                      value: settings.beadSize,
-                      min: 2.5,
-                      max: 10,
-                      divisions: 15,
-                      label: '${settings.beadSize.toStringAsFixed(1)} mm',
-                      onChanged: (v) => settings.setBeadSize(v),
+                    const SizedBox(height: 4),
+                    Text('底板内每 N 颗豆一条分界线，模拟实体底板分区',
+                        style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final p in const [5, 10, 15, 20, 25])
+                          ChoiceChip(
+                            label: Text('$p 豆'),
+                            selected: settings.partitionSize == p,
+                            onSelected: (_) => settings.setPartitionSize(p),
+                          ),
+                      ],
                     ),
                   ],
                 ),

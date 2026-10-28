@@ -439,6 +439,7 @@ class _EditorPageState extends State<EditorPage> {
             showGrid: _showGrid,
             boardSize: widget.settings.boardSize,
             showBoard: state.showBoard,
+            partitionSize: widget.settings.partitionSize,
             brushCode: state.brushCode,
             onPaintCell: (x, y) => _paintCell(state, x, y),
             onEraseCell: (x, y) => state.eraseCell(x, y),
@@ -763,23 +764,6 @@ class _EditorPageState extends State<EditorPage> {
               onChanged: (v) => setState(() => state.setLockRatio(v)),
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              children: [
-                // 预设按底板正方形扩充：1 板 / 2x2 板 / 3x3 板。
-                for (final n in const [1, 2, 3])
-                  ActionChip(
-                    label: Text(
-                        '${widget.settings.boardSize * n}（${n == 1 ? "1" : "$n×$n"} 板）'),
-                    onPressed: () {
-                      final size = widget.settings.boardSize * n;
-                      state.gridWidthCtrl.text = '$size';
-                      state.gridHeightCtrl.text = '$size';
-                      state.confirmGridSize();
-                    },
-                  ),
-              ],
-            ),
             const Divider(height: 32),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -799,9 +783,8 @@ class _EditorPageState extends State<EditorPage> {
               title: const Text('显示底板'),
               subtitle: Text(
                 state.showBoard
-                    ? '底板 ${widget.settings.boardSize}x${widget.settings.boardSize}'
-                        '（${(widget.settings.boardSize * widget.settings.beadSize / 10).toStringAsFixed(1)} cm），'
-                        '拼豆不可超出'
+                    ? '底板 ${widget.settings.boardSize}x${widget.settings.boardSize}，'
+                        '每 ${widget.settings.partitionSize} 豆一分区，拼豆不可超出'
                     : '开启后显示实体底板，拼豆超出自动缩回',
                 style: const TextStyle(fontSize: 12),
               ),

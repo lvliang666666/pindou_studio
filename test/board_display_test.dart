@@ -1,6 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pindou_studio/core/converter.dart';
-import 'package:pindou_studio/core/palette.dart';
 import 'package:pindou_studio/state/editor_state.dart';
 
 void main() {

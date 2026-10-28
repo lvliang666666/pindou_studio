@@ -18,6 +18,7 @@ class PatternCanvas extends StatefulWidget {
     this.showRuler = true,
     this.boardSize = 29,
     this.showBoard = false,
+    this.partitionSize = 10,
     this.onCellTap,
     this.brushCode,
     this.onPaintCell,
@@ -42,6 +43,9 @@ class PatternCanvas extends StatefulWidget {
 
   /// 是否显示实体底板（白色底板铺在图纸下方，图纸小于底板时露出）。
   final bool showBoard;
+
+  /// 底板分区尺寸（豆数）：每 N 颗豆一条分界线。
+  final int partitionSize;
 
   /// 点击格子回调（未启用画笔时），参数为格子坐标 (x, y)。
   final void Function(int x, int y)? onCellTap;
@@ -81,6 +85,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
   bool _rasterShowRuler = true;
   int _rasterBoardSize = 29;
   bool _rasterShowBoard = false;
+  int _rasterPartitionSize = 10;
   PindouCanvasColors? _rasterColors;
 
   /// 位图中图纸相对位图左上角的偏移（格子数）：底板显示时图纸居中，
@@ -180,6 +185,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
             widget.showRuler != _rasterShowRuler ||
             widget.boardSize != _rasterBoardSize ||
             widget.showBoard != _rasterShowBoard ||
+            widget.partitionSize != _rasterPartitionSize ||
             widget.colors != _rasterColors)) {
       _scheduleRasterizeAfterFrame();
     }
@@ -213,6 +219,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterShowRuler == widget.showRuler &&
         _rasterBoardSize == widget.boardSize &&
         _rasterShowBoard == widget.showBoard &&
+        _rasterPartitionSize == widget.partitionSize &&
         _rasterColors == widget.colors;
     _pendingDirtyCells = null;
     try {
@@ -397,6 +404,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
           showBoard: widget.showBoard,
           boardW: boardW,
           boardH: boardH,
+          partitionSize: widget.partitionSize,
         ).paint(canvas, Size(w.toDouble(), h.toDouble()));
       }
       final picture = recorder.endRecording();
@@ -413,6 +421,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterShowRuler = widget.showRuler;
         _rasterBoardSize = widget.boardSize;
         _rasterShowBoard = widget.showBoard;
+        _rasterPartitionSize = widget.partitionSize;
         _rasterColors = widget.colors;
         _rasterOffX = offX;
         _rasterOffY = offY;
@@ -674,6 +683,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
                                 boardH: widget.showBoard
                                     ? math.max(pattern.height, widget.boardSize)
                                     : pattern.height,
+                                partitionSize: widget.partitionSize,
                               )
                             : null,
                         cell: _baseCell,
@@ -839,6 +849,7 @@ class _PatternPainter extends CustomPainter {
     this.showBoard = false,
     this.boardW,
     this.boardH,
+    this.partitionSize = 10,
   });
 
   final BeadPattern pattern;
@@ -854,6 +865,9 @@ class _PatternPainter extends CustomPainter {
   /// 底板区域尺寸（格子数）：showBoard 时由调用方传入（max(图纸, 底板)）。
   final int? boardW;
   final int? boardH;
+
+  /// 底板分区尺寸（豆数）：每 N 颗豆一条分界线。
+  final int partitionSize;
 
   /// 标尺文字跨帧缓存：(文本, 格子尺寸) -> 已排版 TextPainter。
   /// 主题切换时清空（文字颜色变了，缓存的排版结果作废）。
@@ -872,6 +886,25 @@ class _PatternPainter extends CustomPainter {
       canvas.drawRect(
         Rect.fromLTWH(0, 0, bw * cell, bh * cell),
         Paint()..color = colors.boardSurface,
+      );
+      // 底板分区线：每 partitionSize 豆一条分界（比普通网格粗），
+      // 覆盖整个底板区域（含图纸下方），模拟实体底板分区。
+      final ps = partitionSize.clamp(1, math.max(bw, bh)).toInt();
+      final partPath = Path();
+      for (int x = ps; x < bw; x += ps) {
+        partPath.moveTo(x * cell, 0);
+        partPath.lineTo(x * cell, bh * cell);
+      }
+      for (int y = ps; y < bh; y += ps) {
+        partPath.moveTo(0, y * cell);
+        partPath.lineTo(bw * cell, y * cell);
+      }
+      canvas.drawPath(
+        partPath,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = colors.boardEdge,
       );
       canvas.drawRect(
         Rect.fromLTWH(0, 0, bw * cell, bh * cell),
@@ -1043,7 +1076,8 @@ class _PatternPainter extends CustomPainter {
         oldDelegate.colors != colors ||
         oldDelegate.showBoard != showBoard ||
         oldDelegate.boardW != boardW ||
-        oldDelegate.boardH != boardH;
+        oldDelegate.boardH != boardH ||
+        oldDelegate.partitionSize != partitionSize;
   }
 }
 

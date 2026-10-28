@@ -23,8 +23,9 @@ class AppSettings extends ChangeNotifier {
   String _paletteId = 'default';
   int _boardSize = 50;
 
-  /// 单豆物理边长（mm）：底板显示模式下换算底板实际尺寸。
-  double _beadSize = 5.0;
+  /// 底板分区尺寸（豆数）：底板内每 N 颗豆一条分界线。
+  /// 以 5 为最小单位（5/10/15/20/25...），10 为常用值。
+  int _partitionSize = 10;
 
   /// 当前主题。
   PindouTheme get theme => _theme;
@@ -35,8 +36,8 @@ class AppSettings extends ChangeNotifier {
   /// 底板尺寸（正方形边长，豆数）。最小 50，最大 200。
   int get boardSize => _boardSize;
 
-  /// 单豆物理边长（mm）。最小 2.5，最大 10。
-  double get beadSize => _beadSize;
+  /// 底板分区尺寸（豆数）。最小 5，最大 50，5 的倍数。
+  int get partitionSize => _partitionSize;
 
   File? _settingsFile;
 
@@ -86,11 +87,10 @@ class AppSettings extends ChangeNotifier {
           changed = true;
         }
       }
-      final bd = json['beadSize'];
-      if (bd is num && bd >= 2.5 && bd <= 10) {
-        final v = bd.toDouble();
-        if (_beadSize != v) {
-          _beadSize = v;
+      final ps = json['partitionSize'];
+      if (ps is int && ps >= 5 && ps <= 50 && ps % 5 == 0) {
+        if (_partitionSize != ps) {
+          _partitionSize = ps;
           changed = true;
         }
       }
@@ -128,12 +128,12 @@ class AppSettings extends ChangeNotifier {
     await _persist();
   }
 
-  /// 更新单豆物理边长（mm）：立即生效并异步落盘。
-  /// [size] 限制在 2.5~10。
-  Future<void> setBeadSize(double size) async {
-    final s = size.clamp(2.5, 10.0);
-    if (_beadSize == s) return;
-    _beadSize = s;
+  /// 更新底板分区尺寸（豆数）：立即生效并异步落盘。
+  /// [size] 限制在 5~50，自动取 5 的倍数。
+  Future<void> setPartitionSize(int size) async {
+    final s = (size.clamp(5, 50) ~/ 5) * 5;
+    if (_partitionSize == s) return;
+    _partitionSize = s;
     notifyListeners();
     await _persist();
   }
@@ -146,7 +146,7 @@ class AppSettings extends ChangeNotifier {
           'themeId': _theme.id,
           'paletteId': _paletteId,
           'boardSize': _boardSize,
-          'beadSize': _beadSize,
+          'partitionSize': _partitionSize,
         }),
       );
     } catch (_) {
