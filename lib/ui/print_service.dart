@@ -7,15 +7,12 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../core/converter.dart';
 
-/// 打印排版服务：生成 A4 分板 PDF（每页一块 29x29 底板 + 图例页）。
+/// 打印排版服务：生成 A4 分板 PDF（每页一块底板 + 图例页）。
 ///
 /// 中文支持：运行时加载 Windows 系统字体（单文件 TTF；TTC 集合字体
 /// 如微软雅黑 msyh.ttc 不被 pdf 包支持，探测时跳过）。
 class PrintService {
   PrintService._();
-
-  /// 底板尺寸（豆数），与 ExportService.splitByBoards 一致。
-  static const int boardSize = 29;
 
   /// 候选系统字体（按优先级）。仅列单文件 TTF：
   /// - simhei.ttf  黑体（Win7+ 自带）

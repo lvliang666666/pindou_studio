@@ -15,13 +15,30 @@ Future<void> showSettingsDialog(BuildContext context, AppSettings settings) {
   );
 }
 
-class _SettingsDialog extends StatelessWidget {
-  _SettingsDialog({required this.settings});
+class _SettingsDialog extends StatefulWidget {
+  const _SettingsDialog({required this.settings});
 
   final AppSettings settings;
 
+  @override
+  State<_SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<_SettingsDialog> {
+  /// 应用设置（对话框生命周期内共享）。
+  AppSettings get settings => widget.settings;
+
   /// 自定义底板尺寸输入框（对话框生命周期内共享）。
   final _boardCtrl = TextEditingController();
+
+  /// 自定义输入框是否聚焦（聚焦时不反向同步，避免打断输入）。
+  bool _boardFocus = false;
+
+  @override
+  void dispose() {
+    _boardCtrl.dispose();
+    super.dispose();
+  }
 
   static String? _boardError(int current) {
     if (current < 50 || current > 200) return '需在 50 ~ 200 之间';
@@ -119,7 +136,12 @@ class _SettingsDialog extends StatelessWidget {
                       ChoiceChip(
                         label: Text('$preset x $preset'),
                         selected: settings.boardSize == preset,
-                        onSelected: (_) => settings.setBoardSize(preset),
+                        onSelected: (_) {
+                          settings.setBoardSize(preset);
+                          // 自定义输入框同步显示当前值（否则仍显示旧文本，
+                          // 用户会误以为预设没生效）。
+                          _boardCtrl.text = '$preset';
+                        },
                       ),
                   ],
                 ),
@@ -127,32 +149,43 @@ class _SettingsDialog extends StatelessWidget {
               const SizedBox(height: 8),
               ListenableBuilder(
                 listenable: settings,
-                builder: (context, _) => Row(
+                builder: (context, _) {
+                  // 输入框未聚焦时同步当前值（预设点击/外部变更后
+                  // 输入框跟随；用户正在输入时不打断）。
+                  if (!_boardFocus &&
+                      _boardCtrl.text != '${settings.boardSize}') {
+                    _boardCtrl.text = '${settings.boardSize}';
+                  }
+                  return Row(
                   children: [
                     SizedBox(
                       width: 120,
-                      child: TextField(
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: '自定义',
-                          border: const OutlineInputBorder(),
-                          isDense: true,
-                          errorText: _boardError(settings.boardSize),
+                      child: Focus(
+                        onFocusChange: (has) => _boardFocus = has,
+                        child: TextField(
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: '自定义',
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                            errorText: _boardError(settings.boardSize),
+                          ),
+                          controller: _boardCtrl,
+                          onSubmitted: (v) {
+                            final n = int.tryParse(v);
+                            if (n != null && n >= 50 && n <= 200) {
+                              settings.setBoardSize(n);
+                            }
+                          },
                         ),
-                        controller: _boardCtrl,
-                        onSubmitted: (v) {
-                          final n = int.tryParse(v);
-                          if (n != null && n >= 50 && n <= 200) {
-                            settings.setBoardSize(n);
-                          }
-                        },
                       ),
                     ),
                     const SizedBox(width: 8),
                     Text('50 ~ 200（最小 50）',
                         style: Theme.of(context).textTheme.bodySmall),
                   ],
-                ),
+                  );
+                },
               ),
               const SizedBox(height: 12),
               // 底板分区尺寸：底板内每 N 颗豆一条分界线（5 的倍数）。
