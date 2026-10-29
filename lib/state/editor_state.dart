@@ -121,6 +121,10 @@ class EditorState extends ChangeNotifier {
   /// 被编辑格子的自动转换色（用于"涂回原色即清除编辑"与右键擦除）。
   final Map<String, String> _autoCodes = {};
 
+  /// 自动色表只读视图（测试用）。
+  Set<String> get autoCodesKeys => _autoCodes.keys.toSet();
+  Map<String, String> get autoCodesEntries => Map.unmodifiable(_autoCodes);
+
   /// 撤销/重做栈（每项为一笔笔画）。
   final List<_Stroke> _undoStack = [];
   final List<_Stroke> _redoStack = [];
@@ -296,11 +300,54 @@ class EditorState extends ChangeNotifier {
     // 面积平均降采样现有格子（复用转换引擎的缩放语义）。
     final shrunk = _resampleCells(p, newW, newH);
     pattern = _rebuildCounts(shrunk, newW, newH);
+    // 手动编辑坐标按缩放比例重映射（否则撤销/重转会涂错格子）。
+    _remapEditsAfterResize(p.width, p.height, newW, newH);
     gridWidthCtrl.text = '$newW';
     gridHeightCtrl.text = '$newH';
     hasUnsavedChanges = true;
     return '图纸 ${p.width}x${p.height} 超出底板 ${boardSize}x$boardSize，'
         '已自动缩小到 $newW x $newH';
+  }
+
+  /// 图纸尺寸变化后重映射手动编辑坐标（旧坐标 -> 新坐标）。
+  ///
+  /// 缩小是"多格并一格"：多个旧坐标可能映射到同一新坐标——
+  /// 后映射的覆盖先映射的（与格子重采样"取权重最大色"的语义一致，
+  /// 保留的是缩放后该格的实际内容）。撤销栈直接清空（笔画坐标
+  /// 已失效，无法可靠映射，保留会涂错位置）。
+  void _remapEditsAfterResize(int oldW, int oldH, int newW, int newH) {
+    if (manualEdits.isEmpty && _autoCodes.isEmpty) return;
+    final xRatio = oldW / newW;
+    final yRatio = oldH / newH;
+    // 新坐标 -> 旧编辑（同格多编辑时保留最后一个，与重采样语义一致）。
+    final remapped = <String, String>{};
+    manualEdits.forEach((key, code) {
+      final parts = key.split(',');
+      final ox = int.parse(parts[0]);
+      final oy = int.parse(parts[1]);
+      final nx = (ox / xRatio).floor().clamp(0, newW - 1);
+      final ny = (oy / yRatio).floor().clamp(0, newH - 1);
+      remapped['$nx,$ny'] = code;
+    });
+    manualEdits
+      ..clear()
+      ..addAll(remapped);
+    // 自动色表按新坐标重建：值取缩放后图纸在该格的实际内容
+    // （旧自动色对应旧格子，缩放后已无意义）。
+    final p = pattern;
+    _autoCodes.clear();
+    if (p != null) {
+      for (final key in manualEdits.keys) {
+        final parts = key.split(',');
+        final nx = int.parse(parts[0]);
+        final ny = int.parse(parts[1]);
+        _autoCodes[key] = p.cellAt(nx, ny)?.code ?? '';
+      }
+    }
+    // 撤销/重做栈的笔画坐标是旧尺寸的，无法可靠映射，直接作废。
+    _undoStack.clear();
+    _redoStack.clear();
+    _currentStroke = null;
   }
 
   /// 面积平均重采样格子（含空格：空格占比过半则输出空格）。
