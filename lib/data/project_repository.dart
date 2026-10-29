@@ -120,7 +120,7 @@ class ProjectRepository {
           width: project.width,
           height: project.height,
           colorCount: project.toPattern()?.colorCount ?? 0,
-          totalBeads: project.width * project.height,
+          totalBeads: project.toPattern()?.totalBeads ?? 0,
           hasThumbnail: _thumbFile(project.id).existsSync(),
         ));
       } catch (_) {

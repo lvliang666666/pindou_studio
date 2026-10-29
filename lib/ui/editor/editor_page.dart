@@ -152,7 +152,10 @@ class _EditorPageState extends State<EditorPage> {
 
   /// 多图拼合：对话框内完成转换，结果装入编辑器（保留配方支持改颗粒度重拼）。
   Future<void> _stitchImages() async {
-    final result = await showStitchDialog(context);
+    final result = await showStitchDialog(
+      context,
+      boardSize: widget.settings.boardSize,
+    );
     if (result == null || !mounted) return;
     widget.state.loadPattern(
       result.$1.pattern,
@@ -434,6 +437,14 @@ class _EditorPageState extends State<EditorPage> {
             pattern: pattern,
             colors: canvasColors,
             showGrid: _showGrid,
+            boardSize: widget.settings.boardSize,
+            showBoard: state.showBoard,
+            partitionSize: widget.settings.partitionSize,
+            boardOffsetX: state.boardOffsetX,
+            boardOffsetY: state.boardOffsetY,
+            onMovePattern: state.showBoard
+                ? (dx, dy) => state.movePatternOnBoard(dx, dy)
+                : null,
             brushCode: state.brushCode,
             onPaintCell: (x, y) => _paintCell(state, x, y),
             onEraseCell: (x, y) => state.eraseCell(x, y),
@@ -675,10 +686,23 @@ class _EditorPageState extends State<EditorPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              state.isStitched ? '单张颗粒度（豆）' : '图纸尺寸（豆数）',
+              state.isBoardMode
+                  ? '一板多图（${widget.settings.boardSize} x ${widget.settings.boardSize}）'
+                  : state.isStitched
+                      ? '单张颗粒度（豆）'
+                      : '图纸尺寸（豆数）',
               style: Theme.of(context).textTheme.titleSmall,
             ),
-            if (state.isStitched)
+            if (state.isBoardMode)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '总尺寸固定为底板，子图自动分布；'
+                  '底板尺寸在设置页修改，点「确认尺寸并生成」重拼',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              )
+            else if (state.isStitched)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
@@ -745,20 +769,6 @@ class _EditorPageState extends State<EditorPage> {
               onChanged: (v) => setState(() => state.setLockRatio(v)),
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              children: [
-                for (final preset in const [29, 58, 87])
-                  ActionChip(
-                    label: Text('$preset'),
-                    onPressed: () {
-                      state.gridWidthCtrl.text = '$preset';
-                      state.gridHeightCtrl.text = '$preset';
-                      state.confirmGridSize();
-                    },
-                  ),
-              ],
-            ),
             const Divider(height: 32),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -772,6 +782,26 @@ class _EditorPageState extends State<EditorPage> {
               title: const Text('显示网格线'),
               value: _showGrid,
               onChanged: (v) => setState(() => _showGrid = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('显示底板'),
+              subtitle: Text(
+                state.showBoard
+                    ? '底板 ${widget.settings.boardSize}x${widget.settings.boardSize}，'
+                        '每 ${widget.settings.partitionSize} 豆一分区，拼豆不可超出'
+                    : '开启后显示实体底板，拼豆超出自动缩回',
+                style: const TextStyle(fontSize: 12),
+              ),
+              value: state.showBoard,
+              onChanged: (v) {
+                final msg = state.setShowBoard(v);
+                if (msg != null && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(msg)),
+                  );
+                }
+              },
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -892,7 +922,9 @@ class _EditorPageState extends State<EditorPage> {
                       _statRow('图纸尺寸', '${pattern.width} x ${pattern.height}', context),
                       _statRow('总豆数', '${pattern.totalBeads}', context),
                       _statRow('颜色数', '${pattern.colorCount}', context),
-                      _statRow('底板数', '${pattern.boardCount} (29x29)', context),
+                      _statRow('底板数',
+                          '${pattern.boardCount(boardSize: widget.settings.boardSize)} (${widget.settings.boardSize}x${widget.settings.boardSize})',
+                          context),
                     ],
                   ),
                 ),
@@ -926,7 +958,9 @@ class _EditorPageState extends State<EditorPage> {
               ],
             ),
           ),
-          if (pattern != null && pattern.width > 29 || pattern != null && pattern.height > 29)
+          if (pattern != null &&
+              (pattern.width > widget.settings.boardSize ||
+                  pattern.height > widget.settings.boardSize))
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: OutlinedButton.icon(
@@ -934,7 +968,8 @@ class _EditorPageState extends State<EditorPage> {
                     ? null
                     : () => _exportBoardPngs(state.pattern!),
                 icon: const Icon(Icons.dashboard_customize),
-                label: Text('分板导出 PNG (${pattern.boardCount} 块)',
+                label: Text(
+                    '分板导出 PNG (${pattern.boardCount(boardSize: widget.settings.boardSize)} 块)',
                     style: const TextStyle(fontSize: 13)),
               ),
             ),
@@ -1091,7 +1126,8 @@ class _EditorPageState extends State<EditorPage> {
   // ---------- 导出 ----------
 
   Future<void> _exportPng(BeadPattern pattern) async {
-    final bytes = await ExportService.renderPatternPng(pattern);
+    final bytes = await ExportService.renderPatternPng(
+        pattern, boardSize: widget.settings.boardSize);
     final suggestedName = 'pindou_${pattern.width}x${pattern.height}.png';
     final location = await getSaveLocation(
       suggestedName: suggestedName,
@@ -1122,9 +1158,11 @@ class _EditorPageState extends State<EditorPage> {
     );
     if (directoryPath == null) return;
     try {
-      final boards = ExportService.splitByBoards(pattern);
+      final boards = ExportService.splitByBoards(pattern,
+          boardSize: widget.settings.boardSize);
       for (final (bx, by, sub) in boards) {
-        final bytes = await ExportService.renderPatternPng(sub);
+        final bytes = await ExportService.renderPatternPng(sub,
+            boardSize: widget.settings.boardSize);
         final name =
             'board_r${by + 1}_c${bx + 1}_${sub.width}x${sub.height}.png';
         final file = XFile.fromData(bytes, mimeType: 'image/png', name: name);
@@ -1179,7 +1217,8 @@ class _EditorPageState extends State<EditorPage> {
     try {
       await Printing.layoutPdf(
         onLayout: (format) =>
-            PrintService.buildPdf(pattern, projectName: name),
+            PrintService.buildPdf(pattern,
+                projectName: name, boardSize: widget.settings.boardSize),
         name: name,
         format: const PdfPageFormat(595, 842, marginAll: 0),
         usePrinterSettings: true,
@@ -1212,7 +1251,8 @@ class _EditorPageState extends State<EditorPage> {
     }
     try {
       final bytes =
-          await PrintService.buildPdf(pattern, projectName: name);
+          await PrintService.buildPdf(pattern,
+              projectName: name, boardSize: widget.settings.boardSize);
       final file = XFile.fromData(bytes,
           mimeType: 'application/pdf', name: suggestedName);
       await file.saveTo(path);

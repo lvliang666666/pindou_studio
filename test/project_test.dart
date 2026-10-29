@@ -351,7 +351,8 @@ void main() {
       expect(state.projectName, isEmpty);
       expect(state.pattern, isNull);
       expect(state.hasUnsavedChanges, isFalse);
-      expect(state.gridWidthCtrl.text, '29');
+      // 默认图纸尺寸跟随底板尺寸（50x50）。
+      expect(state.gridWidthCtrl.text, '50');
     });
 
     test('loadImage 记录原图字节与扩展名，save 留存到仓库', () async {

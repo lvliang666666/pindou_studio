@@ -20,6 +20,9 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
     required this.overlayMask,
     required this.overlayText,
     this.emptyCell = const Color(0x14000000),
+    this.boardSurface = const Color(0xFFFFFFFF),
+    this.boardEdge = const Color(0x33000000),
+    this.boardGrid = const Color(0x14000000),
   });
 
   /// 画布区背景（图纸外围留白）。
@@ -48,6 +51,15 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
 
   /// 空格（不放豆）棋盘格纹理色。
   final Color emptyCell;
+
+  /// 实体底板表面色（底板显示模式）。
+  final Color boardSurface;
+
+  /// 实体底板边缘描边色。
+  final Color boardEdge;
+
+  /// 实体底板格线色（淡，与分区线区分）。
+  final Color boardGrid;
 
   static final light = PindouCanvasColors(
     canvasBg: const Color(0xFFEFF1F4),
@@ -81,6 +93,9 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
     overlayMask: const Color(0xCC16181D),
     overlayText: const Color(0xFFC9D1D9),
     emptyCell: const Color(0x14FFFFFF),
+    boardSurface: const Color(0xFF161B22),
+    boardEdge: const Color(0x55FFFFFF),
+    boardGrid: const Color(0x22FFFFFF),
   );
 
   static final hacker = PindouCanvasColors(
@@ -93,6 +108,9 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
     overlayMask: const Color(0xD9000000),
     overlayText: const Color(0xFF00FF41),
     emptyCell: const Color(0x1400FF41),
+    boardSurface: const Color(0xFF001100),
+    boardEdge: const Color(0x8800FF41),
+    boardGrid: const Color(0x3300FF41),
   );
 
   @override
@@ -106,6 +124,9 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
     Color? overlayMask,
     Color? overlayText,
     Color? emptyCell,
+    Color? boardSurface,
+    Color? boardEdge,
+    Color? boardGrid,
   }) {
     return PindouCanvasColors(
       canvasBg: canvasBg ?? this.canvasBg,
@@ -117,6 +138,9 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
       overlayMask: overlayMask ?? this.overlayMask,
       overlayText: overlayText ?? this.overlayText,
       emptyCell: emptyCell ?? this.emptyCell,
+      boardSurface: boardSurface ?? this.boardSurface,
+      boardEdge: boardEdge ?? this.boardEdge,
+      boardGrid: boardGrid ?? this.boardGrid,
     );
   }
 
@@ -133,6 +157,9 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
       overlayMask: Color.lerp(overlayMask, other.overlayMask, t)!,
       overlayText: Color.lerp(overlayText, other.overlayText, t)!,
       emptyCell: Color.lerp(emptyCell, other.emptyCell, t)!,
+      boardSurface: Color.lerp(boardSurface, other.boardSurface, t)!,
+      boardEdge: Color.lerp(boardEdge, other.boardEdge, t)!,
+      boardGrid: Color.lerp(boardGrid, other.boardGrid, t)!,
     );
   }
 
@@ -148,12 +175,16 @@ class PindouCanvasColors extends ThemeExtension<PindouCanvasColors> {
         other.patternBorder == patternBorder &&
         other.overlayMask == overlayMask &&
         other.overlayText == overlayText &&
-        other.emptyCell == emptyCell;
+        other.emptyCell == emptyCell &&
+        other.boardSurface == boardSurface &&
+        other.boardEdge == boardEdge &&
+        other.boardGrid == boardGrid;
   }
 
   @override
   int get hashCode => Object.hash(canvasBg, gridThin, gridMajor, boardDash,
-      rulerText, patternBorder, overlayMask, overlayText, emptyCell);
+      rulerText, patternBorder, overlayMask, overlayText, emptyCell,
+      boardSurface, boardEdge, boardGrid);
 }
 
 /// 从 BuildContext 取画布配色（未挂载时回退浅色，防御测试环境）。

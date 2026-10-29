@@ -11,10 +11,13 @@ import '../core/stitcher.dart';
 ///
 /// 返回 (拼合结果, 拼合配方)（null = 取消）。转换在对话框内完成后随结果
 /// 返回，由调用方装入编辑器；配方保留后改「图纸尺寸」可按新颗粒度重拼。
-Future<(StitchResult, StitchRecipe)?> showStitchDialog(BuildContext context) {
+Future<(StitchResult, StitchRecipe)?> showStitchDialog(
+  BuildContext context, {
+  int boardSize = 29,
+}) {
   return showDialog<(StitchResult, StitchRecipe)>(
     context: context,
-    builder: (context) => const _StitchDialog(),
+    builder: (context) => _StitchDialog(boardSize: boardSize),
   );
 }
 
@@ -36,7 +39,10 @@ class _StitchImage {
 }
 
 class _StitchDialog extends StatefulWidget {
-  const _StitchDialog();
+  const _StitchDialog({required this.boardSize});
+
+  /// 底板尺寸（豆数）：预览的底板数按此计算。
+  final int boardSize;
 
   @override
   State<_StitchDialog> createState() => _StitchDialogState();
@@ -50,6 +56,9 @@ class _StitchDialogState extends State<_StitchDialog> {
 
   /// 每行张数。
   double _columns = 2;
+
+  /// 一板多图模式：总尺寸固定为底板（boardSize），子图缩小排进板内。
+  bool _boardMode = false;
 
   bool _dither = true;
   bool _working = false;
@@ -139,28 +148,58 @@ class _StitchDialogState extends State<_StitchDialog> {
                 ),
               ),
             const SizedBox(height: 12),
-            Text('单张颗粒度：${_maxSize.round()} 豆',
-                style: theme.textTheme.titleSmall),
-            Slider(
-              value: _maxSize,
-              min: 10,
-              max: 87,
-              divisions: 77,
-              label: '${_maxSize.round()}',
-              onChanged: _working ? null : (v) => setState(() => _maxSize = v),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.grid_view),
+                  label: Text('自由拼合'),
+                ),
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(Icons.dashboard_customize),
+                  label: Text('一板多图'),
+                ),
+              ],
+              selected: {_boardMode},
+              onSelectionChanged: _working
+                  ? null
+                  : (s) => setState(() => _boardMode = s.first),
             ),
-            Text('值越大颗粒越细、豆数越多；生成后仍可在参数区改图纸尺寸重新拼合',
-                style: theme.textTheme.bodySmall),
-            Text('每行张数：${_columns.round()}',
-                style: theme.textTheme.titleSmall),
-            Slider(
-              value: _columns,
-              min: 1,
-              max: 5,
-              divisions: 4,
-              label: '${_columns.round()}',
-              onChanged: _working ? null : (v) => setState(() => _columns = v),
-            ),
+            const SizedBox(height: 8),
+            if (_boardMode)
+              Text(
+                '全部图片排进一块 ${widget.boardSize} x ${widget.boardSize} 底板'
+                '（设置页可改底板尺寸），子图自动缩小分布，'
+                '空余处留空不放豆',
+                style: theme.textTheme.bodySmall,
+              )
+            else ...[
+              Text('单张颗粒度：${_maxSize.round()} 豆',
+                  style: theme.textTheme.titleSmall),
+              Slider(
+                value: _maxSize,
+                min: 10,
+                max: 87,
+                divisions: 77,
+                label: '${_maxSize.round()}',
+                onChanged:
+                    _working ? null : (v) => setState(() => _maxSize = v),
+              ),
+              Text('值越大颗粒越细、豆数越多；生成后仍可在参数区改图纸尺寸重新拼合',
+                  style: theme.textTheme.bodySmall),
+              Text('每行张数：${_columns.round()}',
+                  style: theme.textTheme.titleSmall),
+              Slider(
+                value: _columns,
+                min: 1,
+                max: 5,
+                divisions: 4,
+                label: '${_columns.round()}',
+                onChanged:
+                    _working ? null : (v) => setState(() => _columns = v),
+              ),
+            ],
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
@@ -171,9 +210,14 @@ class _StitchDialogState extends State<_StitchDialog> {
             const SizedBox(height: 4),
             Text(
               _images.isEmpty
-                  ? '拼合后总尺寸：—'
-                  : '拼合后总尺寸：$totalW x $totalH 豆'
-                    '（${((totalW + 28) ~/ 29) * ((totalH + 28) ~/ 29)} 块底板）',
+                  ? (_boardMode
+                      ? '生成尺寸：${widget.boardSize} x ${widget.boardSize} 豆（1 块底板）'
+                      : '拼合后总尺寸：—')
+                  : _boardMode
+                      ? '生成尺寸：${widget.boardSize} x ${widget.boardSize} 豆'
+                        '（1 块底板，${_images.length} 张图自动分布）'
+                      : '拼合后总尺寸：$totalW x $totalH 豆'
+                        '（${((totalW + widget.boardSize - 1) ~/ widget.boardSize) * ((totalH + widget.boardSize - 1) ~/ widget.boardSize)} 块底板）',
               style: theme.textTheme.bodySmall,
             ),
             if (_error != null) ...[
@@ -278,23 +322,29 @@ class _StitchDialogState extends State<_StitchDialog> {
         columns: _columns.round(),
         dither: _dither,
       );
+      final images = [
+        for (final im in _images) (im.pixels, im.width, im.height),
+      ];
       // 转换放 isolate，避免多张大图卡 UI。
       final result = await compute(
         _stitchSync,
         _StitchArgs(
-          images: [
-            for (final im in _images) (im.pixels, im.width, im.height),
-          ],
+          images: images,
           options: options,
+          boardMode: _boardMode,
+          boardSize: widget.boardSize,
         ),
       );
       if (!mounted) return;
       // 随结果带回拼合配方：编辑器里改图纸尺寸可按新颗粒度重新拼合。
       Navigator.of(context).pop((
         result,
-        StitchRecipe(images: [
-          for (final im in _images) (im.pixels, im.width, im.height),
-        ], options: options),
+        StitchRecipe(
+          images: images,
+          options: options,
+          boardMode: _boardMode,
+          boardSize: widget.boardSize,
+        ),
       ));
     } catch (e) {
       if (!mounted) return;
@@ -308,11 +358,25 @@ class _StitchDialogState extends State<_StitchDialog> {
 
 /// isolate 参数（compute 需顶层/静态可序列化）。
 class _StitchArgs {
-  const _StitchArgs({required this.images, required this.options});
+  const _StitchArgs({
+    required this.images,
+    required this.options,
+    this.boardMode = false,
+    this.boardSize = 50,
+  });
   final List<(Uint8List, int, int)> images;
   final StitchOptions options;
+  final bool boardMode;
+  final int boardSize;
 }
 
 StitchResult _stitchSync(_StitchArgs args) {
+  if (args.boardMode) {
+    return BeadStitcher.stitchOnBoard(
+      images: args.images,
+      boardSize: args.boardSize,
+      options: args.options,
+    );
+  }
   return BeadStitcher.stitch(images: args.images, options: args.options);
 }

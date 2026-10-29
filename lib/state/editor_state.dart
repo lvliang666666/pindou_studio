@@ -23,9 +23,18 @@ export '../core/palette.dart' show BeadColor, BeadPalette;
 class EditorState extends ChangeNotifier {
   EditorState({ProjectRepository? repository})
       : repository = repository ?? ProjectRepository() {
-    // 默认参数：29x29 标准底板。
-    gridWidthCtrl.text = '29';
-    gridHeightCtrl.text = '29';
+    // 默认参数：跟随底板尺寸（AppSettings 加载后经 syncDefaultGridSize 同步）。
+    gridWidthCtrl.text = '$_defaultGridSize';
+    gridHeightCtrl.text = '$_defaultGridSize';
+  }
+
+  /// 默认图纸尺寸（豆数）：跟随底板尺寸，AppSettings 加载后同步。
+  /// 静态：所有 EditorState 实例共享同一默认值。
+  static int _defaultGridSize = 50;
+
+  /// 底板尺寸变化后同步默认图纸尺寸（仅影响空编辑器/新建项目）。
+  static void syncDefaultGridSize(int boardSize) {
+    if (boardSize >= 1) _defaultGridSize = boardSize;
   }
 
   /// 项目仓库。
@@ -208,6 +217,139 @@ class EditorState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---------- 底板显示模式 ----------
+
+  /// 是否显示底板（白色实体底板铺在工作区，拼豆不可超出）。
+  bool showBoard = false;
+
+  /// 底板尺寸（豆数）：由设置页同步（AppSettings.boardSize）。
+  int boardSize = 50;
+
+  /// 图纸在底板上的偏移（格子数）：底板显示时图纸可拖动摆放，
+  /// (0,0) = 左上角对齐。非底板模式恒为 0。
+  int boardOffsetX = 0;
+  int boardOffsetY = 0;
+
+  /// 图纸在底板上的最大偏移（底板尺寸 - 图纸尺寸，最小 0）。
+  int get maxBoardOffsetX => math.max(0, boardSize - (pattern?.width ?? 0));
+  int get maxBoardOffsetY => math.max(0, boardSize - (pattern?.height ?? 0));
+
+  /// 切换底板显示。开启时若图纸超出底板，自动缩回并提示。
+  /// 返回提示文案（null = 无需提示）。
+  String? setShowBoard(bool v) {
+    showBoard = v;
+    if (!v) {
+      notifyListeners();
+      return null;
+    }
+    final msg = _shrinkToBoard();
+    _clampBoardOffset();
+    notifyListeners();
+    return msg;
+  }
+
+  /// 同步底板尺寸（设置页修改后调用）。开启状态下若图纸超出，自动缩回。
+  /// 返回提示文案（null = 无需提示）。
+  String? syncBoardSize(int size) {
+    if (size < 1) return null;
+    boardSize = size;
+    if (!showBoard) {
+      notifyListeners();
+      return null;
+    }
+    final msg = _shrinkToBoard();
+    _clampBoardOffset();
+    notifyListeners();
+    return msg;
+  }
+
+  /// 偏移越界时收回底板范围内。
+  void _clampBoardOffset() {
+    boardOffsetX = boardOffsetX.clamp(0, maxBoardOffsetX);
+    boardOffsetY = boardOffsetY.clamp(0, maxBoardOffsetY);
+  }
+
+  /// 移动图纸在底板上的位置（格子数增量）。返回是否移动。
+  /// 底板未显示或无图纸时不移动；越界自动钳制在底板内。
+  bool movePatternOnBoard(int dx, int dy) {
+    if (!showBoard || pattern == null) return false;
+    if (dx == 0 && dy == 0) return false;
+    final nx = (boardOffsetX + dx).clamp(0, maxBoardOffsetX);
+    final ny = (boardOffsetY + dy).clamp(0, maxBoardOffsetY);
+    if (nx == boardOffsetX && ny == boardOffsetY) return false;
+    boardOffsetX = nx;
+    boardOffsetY = ny;
+    notifyListeners();
+    return true;
+  }
+
+  /// 图纸超出底板时按比例缩小到恰好放进底板（居中留空）。
+  /// 返回提示文案（null = 未超出，无需缩放）。
+  String? _shrinkToBoard() {
+    final p = pattern;
+    if (p == null) return null;
+    if (p.width <= boardSize && p.height <= boardSize) return null;
+    // 等比缩小：以较长边为基准缩到 boardSize。
+    final scale = boardSize / math.max(p.width, p.height);
+    final newW = (p.width * scale).floor().clamp(1, boardSize);
+    final newH = (p.height * scale).floor().clamp(1, boardSize);
+    // 面积平均降采样现有格子（复用转换引擎的缩放语义）。
+    final shrunk = _resampleCells(p, newW, newH);
+    pattern = _rebuildCounts(shrunk, newW, newH);
+    gridWidthCtrl.text = '$newW';
+    gridHeightCtrl.text = '$newH';
+    hasUnsavedChanges = true;
+    return '图纸 ${p.width}x${p.height} 超出底板 ${boardSize}x$boardSize，'
+        '已自动缩小到 $newW x $newH';
+  }
+
+  /// 面积平均重采样格子（含空格：空格占比过半则输出空格）。
+  static List<BeadColor?> _resampleCells(BeadPattern p, int newW, int newH) {
+    final out = List<BeadColor?>.filled(newW * newH, null);
+    final xRatio = p.width / newW;
+    final yRatio = p.height / newH;
+    for (int dy = 0; dy < newH; dy++) {
+      final sy0 = dy * yRatio;
+      final sy1 = (dy + 1) * yRatio;
+      for (int dx = 0; dx < newW; dx++) {
+        final sx0 = dx * xRatio;
+        final sx1 = (dx + 1) * xRatio;
+        final yStart = sy0.floor(), yEnd = sy1.ceil().clamp(0, p.height);
+        final xStart = sx0.floor(), xEnd = sx1.ceil().clamp(0, p.width);
+        final counts = <BeadColor, int>{};
+        var empty = 0, total = 0;
+        for (int sy = yStart; sy < yEnd; sy++) {
+          for (int sx = xStart; sx < xEnd; sx++) {
+            final wx = math.min(sx + 1, sx1) - math.max(sx, sx0);
+            final wy = math.min(sy + 1, sy1) - math.max(sy, sy0);
+            if (wx <= 0 || wy <= 0) continue;
+            final w = (wx * wy * 100).round();
+            total += w;
+            final bead = p.cellAt(sx, sy);
+            if (bead == null) {
+              empty += w;
+            } else {
+              counts[bead] = (counts[bead] ?? 0) + w;
+            }
+          }
+        }
+        if (total == 0) continue;
+        // 空格过半 → 空格；否则取权重最大的颜色。
+        if (empty * 2 > total) continue;
+        BeadColor? best;
+        var bestW = 0;
+        counts.forEach((c, w) {
+          if (w > bestW) {
+            best = c;
+            bestW = w;
+          }
+        });
+        out[dy * newW + dx] = best;
+      }
+    }
+    return out;
+  }
+
   /// 输入宽度：只更新文本，不联动、不渲染。
   /// 渲染时机完全由"确认"按钮/回车/失焦触发（confirmGridSize）。
   void setGridWidth(String text) {}
@@ -227,6 +369,12 @@ class EditorState extends ChangeNotifier {
     _debounce = Timer(const Duration(milliseconds: 150), () async {
       final recipe = _stitchRecipe;
       if (recipe != null) {
+        if (recipe.boardMode) {
+          // 一板多图：总尺寸固定为底板，颗粒度由布局决定，
+          // 尺寸确认无意义——直接按原参数重拼（刷新用）。
+          await _restitch(recipe, perImageMaxSize: recipe.boardSize);
+          return;
+        }
         final gw = int.tryParse(gridWidthCtrl.text) ?? 0;
         final gh = int.tryParse(gridHeightCtrl.text) ?? 0;
         final maxSize = gw >= 1 || gh >= 1 ? math.max(gw, gh) : 0;
@@ -692,6 +840,9 @@ class EditorState extends ChangeNotifier {
   /// 当前是否为拼合项目（参数区提示用）。
   bool get isStitched => _stitchRecipe != null;
 
+  /// 当前是否为一板多图项目（板模式颗粒度不可调）。
+  bool get isBoardMode => _stitchRecipe?.boardMode ?? false;
+
   // ---------- 项目保存 / 加载 ----------
 
   /// 保存当前项目。新项目自动生成 id；[name] 为空时用原文件名或默认名。
@@ -815,8 +966,8 @@ class EditorState extends ChangeNotifier {
     colorLimit = 0;
     BeadPalette.setActive('default');
     paletteId = 'default';
-    gridWidthCtrl.text = '29';
-    gridHeightCtrl.text = '29';
+    gridWidthCtrl.text = '$_defaultGridSize';
+    gridHeightCtrl.text = '$_defaultGridSize';
     _undoStack.clear();
     _redoStack.clear();
     _currentStroke = null;

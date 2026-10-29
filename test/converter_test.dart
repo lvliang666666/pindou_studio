@@ -261,20 +261,37 @@ void main() {
     });
 
     test('boardCount 底板数计算', () {
-      // 29x29 -> 1 块；30x30 -> 4 块；58x29 -> 2 块。
+      // 29x29 -> 1 块；30x30 -> 4 块；58x29 -> 2 块（默认 29 底板）。
       final px = solidImage(60, 60, 255, 255, 255);
       final p1 = BeadConverter.convert(
         pixels: px, srcWidth: 60, srcHeight: 60,
         options: const ConvertOptions(gridWidth: 29, gridHeight: 29, dither: false));
-      expect(p1.boardCount, 1);
+      expect(p1.boardCount(), 1);
       final p2 = BeadConverter.convert(
         pixels: px, srcWidth: 60, srcHeight: 60,
         options: const ConvertOptions(gridWidth: 30, gridHeight: 30, dither: false));
-      expect(p2.boardCount, 4);
+      expect(p2.boardCount(), 4);
       final p3 = BeadConverter.convert(
         pixels: px, srcWidth: 60, srcHeight: 60,
         options: const ConvertOptions(gridWidth: 58, gridHeight: 29, dither: false));
-      expect(p3.boardCount, 2);
+      expect(p3.boardCount(), 2);
+    });
+
+    test('boardCount 自定义底板尺寸', () {
+      final px = solidImage(60, 60, 255, 255, 255);
+      final p = BeadConverter.convert(
+        pixels: px, srcWidth: 60, srcHeight: 60,
+        options: const ConvertOptions(gridWidth: 60, gridHeight: 60, dither: false));
+      // 60x60 图纸：29 底板 9 块；50 底板 4 块；60 底板 1 块。
+      expect(p.boardCount(), 9);
+      expect(p.boardCount(boardSize: 50), 4);
+      expect(p.boardCount(boardSize: 60), 1);
+      // 100x100 图纸：50 底板 4 块。
+      final px2 = solidImage(120, 120, 255, 255, 255);
+      final p100 = BeadConverter.convert(
+        pixels: px2, srcWidth: 120, srcHeight: 120,
+        options: const ConvertOptions(gridWidth: 100, gridHeight: 100, dither: false));
+      expect(p100.boardCount(boardSize: 50), 4);
     });
   });
 }

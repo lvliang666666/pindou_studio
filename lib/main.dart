@@ -19,16 +19,27 @@ class PindouStudioApp extends StatefulWidget {
 class _PindouStudioAppState extends State<PindouStudioApp> {
   late final AppSettings _settings;
 
+  /// 底板尺寸变化 → 同步默认图纸尺寸（空编辑器/新建项目跟随）。
+  void _onSettingsChanged() {
+    EditorState.syncDefaultGridSize(_settings.boardSize);
+  }
+
   @override
   void initState() {
     super.initState();
     _settings = AppSettings();
     // 异步读取持久化设置：首帧先以默认渲染，读完后通知重建。
-    _settings.load();
+    // 底板尺寸同步为默认图纸尺寸（空编辑器/新建项目用）。
+    _settings.load().then((_) {
+      EditorState.syncDefaultGridSize(_settings.boardSize);
+    });
+    // 底板尺寸变化时同步到编辑器状态（底板显示/超出缩回用）。
+    _settings.addListener(_onSettingsChanged);
   }
 
   @override
   void dispose() {
+    _settings.removeListener(_onSettingsChanged);
     _settings.dispose();
     super.dispose();
   }
