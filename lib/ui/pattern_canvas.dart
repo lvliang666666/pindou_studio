@@ -19,9 +19,6 @@ class PatternCanvas extends StatefulWidget {
     this.boardSize = 29,
     this.showBoard = false,
     this.partitionSize = 10,
-    this.boardOffsetX = 0,
-    this.boardOffsetY = 0,
-    this.onMovePattern,
     this.onCellTap,
     this.brushCode,
     this.onPaintCell,
@@ -49,13 +46,6 @@ class PatternCanvas extends StatefulWidget {
 
   /// 底板分区尺寸（豆数）：每 N 颗豆一条分界线。
   final int partitionSize;
-
-  /// 图纸在底板上的偏移（格子数）：底板显示时图纸摆放位置。
-  final int boardOffsetX;
-  final int boardOffsetY;
-
-  /// 拖动图纸在底板上移动（格子数增量）。null = 不支持移动。
-  final bool Function(int dx, int dy)? onMovePattern;
 
   /// 点击格子回调（未启用画笔时），参数为格子坐标 (x, y)。
   final void Function(int x, int y)? onCellTap;
@@ -112,12 +102,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
   int? _lastCellY;
   bool _erasing = false;
   int _activeButtons = 0;
-
-  /// 非画笔 + 底板模式：从图纸上按下拖动 = 平移视图（此时 pan 已由
-  /// 本组件接管，InteractiveViewer 不参与，需手动驱动变换矩阵）。
-  /// 从图纸外空白处拖动 = 移动图纸（_dragStartX 路径，画笔/非画笔通用）。
-  bool _viewPanning = false;
-  Offset? _viewPanLast;
 
   /// 叠加层版本号：涂色时递增，触发画布重绘（不重建子树）。
   final ValueNotifier<int> _overlayVersion = ValueNotifier<int>(0);
@@ -202,8 +186,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
             widget.boardSize != _rasterBoardSize ||
             widget.showBoard != _rasterShowBoard ||
             widget.partitionSize != _rasterPartitionSize ||
-            widget.boardOffsetX != _rasterOffX ||
-            widget.boardOffsetY != _rasterOffY ||
             widget.colors != _rasterColors)) {
       _scheduleRasterizeAfterFrame();
     }
@@ -243,11 +225,11 @@ class _PatternCanvasState extends State<PatternCanvas> {
     try {
       // 2x 超采样：放大到 200% 仍清晰。
       const ss = 2.0;
-      // 底板显示时位图覆盖底板区域，图纸按用户摆放偏移放置。
+      // 底板显示时位图覆盖底板区域，图纸左上角对齐底板（无摆放偏移）。
       final boardW = widget.showBoard ? math.max(p.width, widget.boardSize) : p.width;
       final boardH = widget.showBoard ? math.max(p.height, widget.boardSize) : p.height;
-      final offX = widget.showBoard ? widget.boardOffsetX : 0;
-      final offY = widget.showBoard ? widget.boardOffsetY : 0;
+      const offX = 0;
+      const offY = 0;
       final w = (boardW * _baseCell * ss).round();
       final h = (boardH * _baseCell * ss).round();
       if (w <= 0 || h <= 0) return;
@@ -478,21 +460,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
 
   // ===== 右键擦除（raw pointer）：pan 手势只响应左键，右键需自行处理 =====
 
-  /// 拖动移动图纸：底板模式下从底板空白处（图纸外）按下拖动。
-  /// 记录起点（非 null = 拖动中），移动时按格子增量回调。
-  int? _dragStartX;
-  int? _dragLastBoardX;
-  int? _dragLastBoardY;
-
-  /// 底板坐标（含偏移，可为负/超界）-> 格子坐标；图纸外返回 null 但仍给出原始值。
-  (int, int) _boardCellAt(Offset localPos) {
-    const eps = 1e-6;
-    return (
-      (localPos.dx / _baseCell + eps).floor() - _rasterOffX,
-      (localPos.dy / _baseCell + eps).floor() - _rasterOffY,
-    );
-  }
-
   /// 右键按下：开始擦除笔画。
   void _handleRightDown(PointerDownEvent e) {
     if (widget.brushCode == null) return;
@@ -538,25 +505,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _handlePanStart(DragStartDetails details) {
-    // 底板模式：从图纸外（底板空白处）按下 = 开始拖动移动图纸
-    // （画笔/非画笔模式通用——非画笔时这是移动图纸的唯一入口）。
-    if (widget.showBoard && widget.onMovePattern != null) {
-      final cell = _cellAt(details.localPosition);
-      if (cell == null) {
-        final (bx, by) = _boardCellAt(details.localPosition);
-        _dragStartX = bx;
-        _dragLastBoardX = bx;
-        _dragLastBoardY = by;
-        return;
-      }
-      // 非画笔模式：从图纸上按下 = 平移视图（pan 已由本组件接管，
-      // InteractiveViewer panEnabled=false，需手动驱动变换矩阵）。
-      if (widget.brushCode == null) {
-        _viewPanning = true;
-        _viewPanLast = details.localPosition;
-        return;
-      }
-    }
     final cell = _cellAt(details.localPosition);
     if (cell == null) return;
     widget.onStrokeStart?.call();
@@ -569,32 +517,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _handlePanUpdate(DragUpdateDetails details) {
-    // 拖动移动图纸中：按格子增量回调移动。
-    if (_dragStartX != null) {
-      final (bx, by) = _boardCellAt(details.localPosition);
-      final dx = bx - (_dragLastBoardX ?? bx);
-      final dy = by - (_dragLastBoardY ?? by);
-      if (dx != 0 || dy != 0) {
-        widget.onMovePattern?.call(dx, dy);
-        _dragLastBoardX = bx;
-        _dragLastBoardY = by;
-      }
-      return;
-    }
-    // 非画笔模式平移视图：手动驱动变换矩阵（无惯性，即时跟随）。
-    if (_viewPanning) {
-      final last = _viewPanLast;
-      if (last != null) {
-        final delta = details.localPosition - last;
-        _viewPanLast = details.localPosition;
-        final current = _transform.value.clone();
-        // 屏幕位移需除以当前缩放（矩阵 translate 在缩放坐标系内应用）。
-        final scale = current.getMaxScaleOnAxis();
-        current.translateByDouble(delta.dx / scale, delta.dy / scale, 0, 1);
-        _transform.value = current;
-      }
-      return;
-    }
     if (!_painting) return;
     final cell = _cellAt(details.localPosition);
     if (cell == null) return;
@@ -609,18 +531,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
   }
 
   void _handlePanEnd(DragEndDetails details) {
-    // 结束拖动移动。
-    if (_dragStartX != null) {
-      _dragStartX = null;
-      _dragLastBoardX = null;
-      _dragLastBoardY = null;
-      return;
-    }
-    if (_viewPanning) {
-      _viewPanning = false;
-      _viewPanLast = null;
-      return;
-    }
     if (_painting) {
       _painting = false;
       _lastCellX = null;
@@ -706,10 +616,9 @@ class _PatternCanvasState extends State<PatternCanvas> {
           minScale: 0.2,
           maxScale: 8.0,
           constrained: false,
-          // 画笔模式下左键用于涂色；底板模式下 pan 由本组件接管
-          // （图纸外拖动=移动图纸，图纸上拖动=手动平移视图），
-          // 滚轮/双指缩放不受影响。
-          panEnabled: false,
+          // 画笔模式下左键用于涂色（pan 由本组件接管）；非画笔时
+          // 左键拖动平移视图。滚轮/双指缩放不受影响。
+          panEnabled: !brushActive,
           scaleEnabled: true,
           child: Listener(
             onPointerDown: (e) => _activeButtons = e.buttons,
@@ -724,19 +633,11 @@ class _PatternCanvasState extends State<PatternCanvas> {
                         final cell = _cellAt(details.localPosition);
                         if (cell != null) widget.onCellTap!(cell.$1, cell.$2);
                       }),
-            // pan 接管：画笔模式（涂色/擦除）或底板模式（移动图纸/
-            // 平移视图）都由本组件处理；非底板非画笔时交还
-            // InteractiveViewer（panEnabled 已设 false，此处也需注册
-            // 空实现避免手势冲突——实际用 _handleViewPan 手动平移）。
-            onPanStart: (brushActive || widget.showBoard)
-                ? _handlePanStart
-                : null,
-            onPanUpdate: (brushActive || widget.showBoard)
-                ? _handlePanUpdate
-                : null,
-            onPanEnd: (brushActive || widget.showBoard)
-                ? _handlePanEnd
-                : null,
+            // pan 仅画笔模式注册（涂色/擦除）；非画笔时左键拖动
+            // 交还 InteractiveViewer 平移视图（panEnabled 同步恢复）。
+            onPanStart: brushActive ? _handlePanStart : null,
+            onPanUpdate: brushActive ? _handlePanUpdate : null,
+            onPanEnd: brushActive ? _handlePanEnd : null,
             // 右键擦除与左键涂色同路径：按下拖动 = 连续擦除（pan 手势
             // 不区分按键，_handlePanStart 按 _activeButtons 判定擦除模式），
             // 单击一格 = 一次零距离 pan，同样走 begin/erase/end。
@@ -789,8 +690,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
                                     ? math.max(pattern.height, widget.boardSize)
                                     : pattern.height,
                                 partitionSize: widget.partitionSize,
-                                patternOffsetX: widget.boardOffsetX,
-                                patternOffsetY: widget.boardOffsetY,
+                                patternOffsetX: 0,
+                                patternOffsetY: 0,
                               )
                             : null,
                         cell: _baseCell,

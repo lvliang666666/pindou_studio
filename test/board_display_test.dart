@@ -149,53 +149,5 @@ void main() {
       expect(state.showBoard, isTrue);
       expect(msg, isNull);
     });
-
-    test('movePatternOnBoard：图纸小于底板时可移动并钳制在底板内', () {
-      final state = EditorState();
-      addTearDown(state.dispose);
-      state.boardSize = 100;
-      state.pattern = makePattern(50, 50);
-      state.setShowBoard(true);
-
-      // 向右下移动 10 格。
-      expect(state.movePatternOnBoard(10, 10), isTrue);
-      expect(state.boardOffsetX, 10);
-      expect(state.boardOffsetY, 10);
-
-      // 越界移动被钳制到上限（100-50=50）。
-      state.movePatternOnBoard(100, 100);
-      expect(state.boardOffsetX, 50);
-      expect(state.boardOffsetY, 50);
-
-      // 反向移动回 0，再移负数钳制在 0。
-      state.movePatternOnBoard(-100, -100);
-      expect(state.boardOffsetX, 0);
-      expect(state.boardOffsetY, 0);
-      expect(state.movePatternOnBoard(-5, -5), isFalse);
-    });
-
-    test('movePatternOnBoard：图纸等于底板尺寸时无移动空间', () {
-      final state = EditorState();
-      addTearDown(state.dispose);
-      state.boardSize = 50;
-      state.pattern = makePattern(50, 50);
-      state.setShowBoard(true);
-
-      // maxOffset = 0，任何移动都无效。
-      expect(state.movePatternOnBoard(5, 5), isFalse);
-      expect(state.boardOffsetX, 0);
-      expect(state.boardOffsetY, 0);
-    });
-
-    test('movePatternOnBoard：底板未显示时不移动', () {
-      final state = EditorState();
-      addTearDown(state.dispose);
-      state.boardSize = 100;
-      state.pattern = makePattern(50, 50);
-      // 不开启 showBoard。
-
-      expect(state.movePatternOnBoard(5, 5), isFalse);
-      expect(state.boardOffsetX, 0);
-    });
   });
 }
