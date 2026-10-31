@@ -440,11 +440,6 @@ class _EditorPageState extends State<EditorPage> {
             boardSize: widget.settings.boardSize,
             showBoard: state.showBoard,
             partitionSize: widget.settings.partitionSize,
-            boardOffsetX: state.boardOffsetX,
-            boardOffsetY: state.boardOffsetY,
-            onMovePattern: state.showBoard
-                ? (dx, dy) => state.movePatternOnBoard(dx, dy)
-                : null,
             brushCode: state.brushCode,
             onPaintCell: (x, y) => _paintCell(state, x, y),
             onEraseCell: (x, y) => state.eraseCell(x, y),
