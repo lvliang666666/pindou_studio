@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:pdf/pdf.dart';
@@ -7,12 +6,15 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../core/converter.dart';
 
-/// 打印排版服务：生成 A4 分板 PDF（每页一块底板 + 图例页）。
+/// 打印排版服务：生成 A4 分板 PDF（每页一块 29x29 底板 + 图例页）。
 ///
 /// 中文支持：运行时加载 Windows 系统字体（单文件 TTF；TTC 集合字体
 /// 如微软雅黑 msyh.ttc 不被 pdf 包支持，探测时跳过）。
 class PrintService {
   PrintService._();
+
+  /// 底板尺寸（豆数），与 ExportService.splitByBoards 一致。
+  static const int boardSize = 29;
 
   /// 候选系统字体（按优先级）。仅列单文件 TTF：
   /// - simhei.ttf  黑体（Win7+ 自带）
@@ -57,18 +59,16 @@ class PrintService {
 
   /// 生成打印 PDF 字节。
   ///
-  /// 页面结构：每块底板一页（页眉含项目名与板号），末页为
+  /// 页面结构：每块 29x29 底板一页（页眉含项目名与板号），末页为
   /// 全图颜色图例（色号 + 中文名 + 数量）。
-  /// [boardSize] 底板尺寸（豆数），默认 29。
   static Future<Uint8List> buildPdf(
     BeadPattern pattern, {
     String projectName = '拼豆图纸',
-    int boardSize = 29,
   }) async {
     final font = await loadFont();
     final doc = pw.Document(theme: pw.ThemeData.withFont(base: font));
 
-    final boards = _boardCount(pattern, boardSize);
+    final boards = _boardCount(pattern);
     for (int by = 0; by < boards.$2; by++) {
       for (int bx = 0; bx < boards.$1; bx++) {
         doc.addPage(pw.Page(
@@ -76,7 +76,6 @@ class PrintService {
           build: (context) => _boardPage(
             context, font, pattern, projectName,
             bx: bx, by: by, totalBoards: boards.$1 * boards.$2,
-            boardSize: boardSize,
           ),
         ));
       }
@@ -90,7 +89,7 @@ class PrintService {
   }
 
   /// 底板分板数：(列数, 行数)。
-  static (int, int) _boardCount(BeadPattern pattern, int boardSize) {
+  static (int, int) _boardCount(BeadPattern pattern) {
     return (
       (pattern.width + boardSize - 1) ~/ boardSize,
       (pattern.height + boardSize - 1) ~/ boardSize,
@@ -98,8 +97,8 @@ class PrintService {
   }
 
   /// PDF 总页数（分板页 + 图例页），供测试与预览提示。
-  static int pageCount(BeadPattern pattern, {int boardSize = 29}) {
-    final b = _boardCount(pattern, boardSize);
+  static int pageCount(BeadPattern pattern) {
+    final b = _boardCount(pattern);
     return b.$1 * b.$2 + 1;
   }
 
@@ -114,13 +113,12 @@ class PrintService {
     required int bx,
     required int by,
     required int totalBoards,
-    required int boardSize,
   }) {
     final x0 = bx * boardSize;
     final y0 = by * boardSize;
     final w = (pattern.width - x0).clamp(1, boardSize);
     final h = (pattern.height - y0).clamp(1, boardSize);
-    final boardIndex = by * boardsInRow(pattern, boardSize) + bx + 1;
+    final boardIndex = by * boardsInRow(pattern) + bx + 1;
 
     return pw.Padding(
       padding: const pw.EdgeInsets.all(24),
@@ -144,8 +142,8 @@ class PrintService {
           pw.Center(
             child: pw.CustomPaint(
               size: PdfPoint(
-                _GridPainter.labelGutter + w * _GridPainter.cellFor(boardSize) + 6,
-                _GridPainter.labelGutter + h * _GridPainter.cellFor(boardSize) + 6,
+                _GridPainter.labelGutter + w * _GridPainter.cell + 6,
+                _GridPainter.labelGutter + h * _GridPainter.cell + 6,
               ),
               painter: (canvas, size) {
                 _GridPainter(
@@ -155,7 +153,6 @@ class PrintService {
                   y0: y0,
                   width: w,
                   height: h,
-                  cell: _GridPainter.cellFor(boardSize),
                 ).paint(canvas);
               },
             ),
@@ -172,7 +169,7 @@ class PrintService {
   }
 
   /// 分板列数（供板号计算）。
-  static int boardsInRow(BeadPattern pattern, int boardSize) =>
+  static int boardsInRow(BeadPattern pattern) =>
       (pattern.width + boardSize - 1) ~/ boardSize;
 
   /// 图例页：全图颜色清单（色号 + 中文名 + 数量）。
@@ -238,7 +235,6 @@ class _GridPainter {
     required this.y0,
     required this.width,
     required this.height,
-    required this.cell,
   });
 
   /// 已注册到当前 document 的底层字体（pw.Font.getFont(context) 取得）。
@@ -249,16 +245,9 @@ class _GridPainter {
   final int width;
   final int height;
 
-  /// 每格边长（pt）：按底板尺寸动态计算。
-  /// A4 可用宽约 547pt，29 格 x 16pt = 464pt 恰好放得下；
-  /// 更大的底板（50/87）按可用宽度缩小格子，保证一页一块板。
-  static double cellFor(int boardSize) {
-    const usable = 547.0 - labelGutter - 6;
-    return math.min(16.0, usable / boardSize);
-  }
-
-  /// 每格边长（pt），由构造参数传入（按底板尺寸动态计算）。
-  final double cell;
+  /// 每格边长（pt）：A4 可用宽约 547pt，29 格 x 16pt = 464pt，
+  /// 加行列号留白后仍在页内。
+  static const double cell = 16;
 
   /// 行列号留白（pt）。
   static const double labelGutter = 14;

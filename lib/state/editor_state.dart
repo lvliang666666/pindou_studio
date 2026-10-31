@@ -23,18 +23,9 @@ export '../core/palette.dart' show BeadColor, BeadPalette;
 class EditorState extends ChangeNotifier {
   EditorState({ProjectRepository? repository})
       : repository = repository ?? ProjectRepository() {
-    // 默认参数：跟随底板尺寸（AppSettings 加载后经 syncDefaultGridSize 同步）。
-    gridWidthCtrl.text = '$_defaultGridSize';
-    gridHeightCtrl.text = '$_defaultGridSize';
-  }
-
-  /// 默认图纸尺寸（豆数）：跟随底板尺寸，AppSettings 加载后同步。
-  /// 静态：所有 EditorState 实例共享同一默认值。
-  static int _defaultGridSize = 50;
-
-  /// 底板尺寸变化后同步默认图纸尺寸（仅影响空编辑器/新建项目）。
-  static void syncDefaultGridSize(int boardSize) {
-    if (boardSize >= 1) _defaultGridSize = boardSize;
+    // 默认参数：29x29 标准底板。
+    gridWidthCtrl.text = '29';
+    gridHeightCtrl.text = '29';
   }
 
   /// 项目仓库。
@@ -102,25 +93,6 @@ class EditorState extends ChangeNotifier {
     hasUnsavedChanges = true;
   }
 
-  /// 同步色卡（设置页切换后由应用根调用）。
-  ///
-  /// 与 [setPalette] 的区别：设置页已把全局色卡切好（BeadPalette.setActive
-  /// 已生效），这里只做编辑器侧的跟随——镜像 id、失效画笔、重转换色/
-  /// 重映射图纸。id 相同时幂等跳过（设置页其他字段变化也会触发本方法）。
-  void syncPalette(String id) {
-    if (paletteId == id && BeadPalette.active.id == id) return;
-    BeadPalette.setActive(id);
-    paletteId = BeadPalette.active.id;
-    brushCode = null;
-    if (_pixels != null) {
-      scheduleReconvert();
-    } else {
-      _remapPatternToActivePalette();
-      notifyListeners();
-    }
-    hasUnsavedChanges = true;
-  }
-
   /// 把当前 pattern 的色号重映射到当前色卡（项目加载/色卡切换用）。
   /// 空格（null）原样保留。
   void _remapPatternToActivePalette() {
@@ -139,10 +111,6 @@ class EditorState extends ChangeNotifier {
 
   /// 被编辑格子的自动转换色（用于"涂回原色即清除编辑"与右键擦除）。
   final Map<String, String> _autoCodes = {};
-
-  /// 自动色表只读视图（测试用）。
-  Set<String> get autoCodesKeys => _autoCodes.keys.toSet();
-  Map<String, String> get autoCodesEntries => Map.unmodifiable(_autoCodes);
 
   /// 撤销/重做栈（每项为一笔笔画）。
   final List<_Stroke> _undoStack = [];
@@ -240,151 +208,6 @@ class EditorState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ---------- 底板显示模式 ----------
-
-  /// 是否显示底板（白色实体底板铺在工作区，拼豆不可超出）。
-  bool showBoard = false;
-
-  /// 底板尺寸（豆数）：由设置页同步（AppSettings.boardSize）。
-  int boardSize = 50;
-
-  /// 切换底板显示。开启时若图纸超出底板，自动缩回并提示。
-  /// 返回提示文案（null = 无需提示）。
-  String? setShowBoard(bool v) {
-    showBoard = v;
-    if (!v) {
-      notifyListeners();
-      return null;
-    }
-    final msg = _shrinkToBoard();
-    notifyListeners();
-    return msg;
-  }
-
-  /// 同步底板尺寸（设置页修改后调用）。开启状态下若图纸超出，自动缩回。
-  /// 返回提示文案（null = 无需提示）。
-  String? syncBoardSize(int size) {
-    if (size < 1) return null;
-    boardSize = size;
-    if (!showBoard) {
-      notifyListeners();
-      return null;
-    }
-    final msg = _shrinkToBoard();
-    notifyListeners();
-    return msg;
-  }
-
-  /// 图纸超出底板时按比例缩小到恰好放进底板（居中留空）。
-  /// 返回提示文案（null = 未超出，无需缩放）。
-  String? _shrinkToBoard() {
-    final p = pattern;
-    if (p == null) return null;
-    if (p.width <= boardSize && p.height <= boardSize) return null;
-    // 等比缩小：以较长边为基准缩到 boardSize。
-    final scale = boardSize / math.max(p.width, p.height);
-    final newW = (p.width * scale).floor().clamp(1, boardSize);
-    final newH = (p.height * scale).floor().clamp(1, boardSize);
-    // 面积平均降采样现有格子（复用转换引擎的缩放语义）。
-    final shrunk = _resampleCells(p, newW, newH);
-    pattern = _rebuildCounts(shrunk, newW, newH);
-    // 手动编辑坐标按缩放比例重映射（否则撤销/重转会涂错格子）。
-    _remapEditsAfterResize(p.width, p.height, newW, newH);
-    gridWidthCtrl.text = '$newW';
-    gridHeightCtrl.text = '$newH';
-    hasUnsavedChanges = true;
-    return '图纸 ${p.width}x${p.height} 超出底板 ${boardSize}x$boardSize，'
-        '已自动缩小到 $newW x $newH';
-  }
-
-  /// 图纸尺寸变化后重映射手动编辑坐标（旧坐标 -> 新坐标）。
-  ///
-  /// 缩小是"多格并一格"：多个旧坐标可能映射到同一新坐标——
-  /// 后映射的覆盖先映射的（与格子重采样"取权重最大色"的语义一致，
-  /// 保留的是缩放后该格的实际内容）。撤销栈直接清空（笔画坐标
-  /// 已失效，无法可靠映射，保留会涂错位置）。
-  void _remapEditsAfterResize(int oldW, int oldH, int newW, int newH) {
-    if (manualEdits.isEmpty && _autoCodes.isEmpty) return;
-    final xRatio = oldW / newW;
-    final yRatio = oldH / newH;
-    // 新坐标 -> 旧编辑（同格多编辑时保留最后一个，与重采样语义一致）。
-    final remapped = <String, String>{};
-    manualEdits.forEach((key, code) {
-      final parts = key.split(',');
-      final ox = int.parse(parts[0]);
-      final oy = int.parse(parts[1]);
-      final nx = (ox / xRatio).floor().clamp(0, newW - 1);
-      final ny = (oy / yRatio).floor().clamp(0, newH - 1);
-      remapped['$nx,$ny'] = code;
-    });
-    manualEdits
-      ..clear()
-      ..addAll(remapped);
-    // 自动色表按新坐标重建：值取缩放后图纸在该格的实际内容
-    // （旧自动色对应旧格子，缩放后已无意义）。
-    final p = pattern;
-    _autoCodes.clear();
-    if (p != null) {
-      for (final key in manualEdits.keys) {
-        final parts = key.split(',');
-        final nx = int.parse(parts[0]);
-        final ny = int.parse(parts[1]);
-        _autoCodes[key] = p.cellAt(nx, ny)?.code ?? '';
-      }
-    }
-    // 撤销/重做栈的笔画坐标是旧尺寸的，无法可靠映射，直接作废。
-    _undoStack.clear();
-    _redoStack.clear();
-    _currentStroke = null;
-  }
-
-  /// 面积平均重采样格子（含空格：空格占比过半则输出空格）。
-  static List<BeadColor?> _resampleCells(BeadPattern p, int newW, int newH) {
-    final out = List<BeadColor?>.filled(newW * newH, null);
-    final xRatio = p.width / newW;
-    final yRatio = p.height / newH;
-    for (int dy = 0; dy < newH; dy++) {
-      final sy0 = dy * yRatio;
-      final sy1 = (dy + 1) * yRatio;
-      for (int dx = 0; dx < newW; dx++) {
-        final sx0 = dx * xRatio;
-        final sx1 = (dx + 1) * xRatio;
-        final yStart = sy0.floor(), yEnd = sy1.ceil().clamp(0, p.height);
-        final xStart = sx0.floor(), xEnd = sx1.ceil().clamp(0, p.width);
-        final counts = <BeadColor, int>{};
-        var empty = 0, total = 0;
-        for (int sy = yStart; sy < yEnd; sy++) {
-          for (int sx = xStart; sx < xEnd; sx++) {
-            final wx = math.min(sx + 1, sx1) - math.max(sx, sx0);
-            final wy = math.min(sy + 1, sy1) - math.max(sy, sy0);
-            if (wx <= 0 || wy <= 0) continue;
-            final w = (wx * wy * 100).round();
-            total += w;
-            final bead = p.cellAt(sx, sy);
-            if (bead == null) {
-              empty += w;
-            } else {
-              counts[bead] = (counts[bead] ?? 0) + w;
-            }
-          }
-        }
-        if (total == 0) continue;
-        // 空格过半 → 空格；否则取权重最大的颜色。
-        if (empty * 2 > total) continue;
-        BeadColor? best;
-        var bestW = 0;
-        counts.forEach((c, w) {
-          if (w > bestW) {
-            best = c;
-            bestW = w;
-          }
-        });
-        out[dy * newW + dx] = best;
-      }
-    }
-    return out;
-  }
-
   /// 输入宽度：只更新文本，不联动、不渲染。
   /// 渲染时机完全由"确认"按钮/回车/失焦触发（confirmGridSize）。
   void setGridWidth(String text) {}
@@ -404,12 +227,6 @@ class EditorState extends ChangeNotifier {
     _debounce = Timer(const Duration(milliseconds: 150), () async {
       final recipe = _stitchRecipe;
       if (recipe != null) {
-        if (recipe.boardMode) {
-          // 一板多图：总尺寸固定为底板，颗粒度由布局决定，
-          // 尺寸确认无意义——直接按原参数重拼（刷新用）。
-          await _restitch(recipe, perImageMaxSize: recipe.boardSize);
-          return;
-        }
         final gw = int.tryParse(gridWidthCtrl.text) ?? 0;
         final gh = int.tryParse(gridHeightCtrl.text) ?? 0;
         final maxSize = gw >= 1 || gh >= 1 ? math.max(gw, gh) : 0;
@@ -875,9 +692,6 @@ class EditorState extends ChangeNotifier {
   /// 当前是否为拼合项目（参数区提示用）。
   bool get isStitched => _stitchRecipe != null;
 
-  /// 当前是否为一板多图项目（板模式颗粒度不可调）。
-  bool get isBoardMode => _stitchRecipe?.boardMode ?? false;
-
   // ---------- 项目保存 / 加载 ----------
 
   /// 保存当前项目。新项目自动生成 id；[name] 为空时用原文件名或默认名。
@@ -1001,8 +815,8 @@ class EditorState extends ChangeNotifier {
     colorLimit = 0;
     BeadPalette.setActive('default');
     paletteId = 'default';
-    gridWidthCtrl.text = '$_defaultGridSize';
-    gridHeightCtrl.text = '$_defaultGridSize';
+    gridWidthCtrl.text = '29';
+    gridHeightCtrl.text = '29';
     _undoStack.clear();
     _redoStack.clear();
     _currentStroke = null;

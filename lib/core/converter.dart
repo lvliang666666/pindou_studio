@@ -103,10 +103,9 @@ class BeadPattern {
   /// 使用的颜色种类数。
   int get colorCount => counts.length;
 
-  /// 图纸所需底板数（[boardSize] x [boardSize] 底板，按覆盖面积向上取整）。
-  int boardCount({int boardSize = 29}) {
-    final b = boardSize.clamp(1, 1 << 30);
-    return ((width + b - 1) ~/ b) * ((height + b - 1) ~/ b);
+  /// 图纸所需底板数（29x29 标准底板，按覆盖面积向上取整）。
+  int get boardCount {
+    return ((width + 28) ~/ 29) * ((height + 28) ~/ 29);
   }
 
   /// 获取 (x, y) 处的颜色；空格返回 null。

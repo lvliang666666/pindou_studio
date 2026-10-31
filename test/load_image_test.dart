@@ -23,10 +23,9 @@ void main() {
     await state.loadImage(jpegBytes, 'test.jpg');
 
     expect(state.pattern, isNotNull);
-    // 默认图纸尺寸跟随底板尺寸（50x50）。
-    expect(state.pattern!.width, 50);
-    expect(state.pattern!.height, 50);
-    expect(state.pattern!.totalBeads, 50 * 50);
+    expect(state.pattern!.width, 29);
+    expect(state.pattern!.height, 29);
+    expect(state.pattern!.totalBeads, 29 * 29);
     // 红色图应量化为 D1 正红。
     expect(state.pattern!.cellAt(0, 0)!.code, 'D1');
   });

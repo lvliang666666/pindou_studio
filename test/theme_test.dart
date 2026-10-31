@@ -78,39 +78,6 @@ void main() {
       expect(settings2.theme.id, 'hacker');
     });
 
-    test('boardSize 设置后落盘，重新 load 恢复', () async {
-      final settings = AppSettings(storageRoot: tempDir);
-      addTearDown(settings.dispose);
-      await settings.setBoardSize(50);
-      expect(settings.boardSize, 50);
-
-      final settings2 = AppSettings(storageRoot: tempDir);
-      addTearDown(settings2.dispose);
-      await settings2.load();
-      expect(settings2.boardSize, 50);
-    });
-
-    test('boardSize 越界值被钳制（50~200）', () async {
-      final settings = AppSettings(storageRoot: tempDir);
-      addTearDown(settings.dispose);
-      await settings.setBoardSize(10);
-      expect(settings.boardSize, 50);
-      await settings.setBoardSize(500);
-      expect(settings.boardSize, 200);
-    });
-
-    test('boardSize 缺失时回退 50', () async {
-      final dir = Directory(
-          '${tempDir.path}${Platform.pathSeparator}PindouStudio')
-        ..createSync(recursive: true);
-      File('${dir.path}${Platform.pathSeparator}settings.json')
-          .writeAsStringSync('{"themeId": "default"}');
-      final settings = AppSettings(storageRoot: tempDir);
-      addTearDown(settings.dispose);
-      await settings.load();
-      expect(settings.boardSize, 50);
-    });
-
     test('坏 JSON 回退默认主题', () async {
       final dir = Directory(
           '${tempDir.path}${Platform.pathSeparator}PindouStudio')

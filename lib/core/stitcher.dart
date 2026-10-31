@@ -81,19 +81,10 @@ class BeadStitcher {
 
   /// 按新颗粒度重新拼合（保留来源图与每行张数，只改单张最长边）。
   /// 转换参数沿用首次拼合时的抖动设置。
-  /// 一板多图配方（boardMode）：总尺寸固定为底板，颗粒度不可调，
-  /// 直接按原参数重拼（忽略 perImageMaxSize）。
   static StitchResult restitch(
     StitchRecipe recipe, {
     required int perImageMaxSize,
   }) {
-    if (recipe.boardMode) {
-      return stitchOnBoard(
-        images: recipe.images,
-        boardSize: recipe.boardSize,
-        options: recipe.options,
-      );
-    }
     return stitch(
       images: recipe.images,
       options: recipe.options.copyWith(perImageMaxSize: perImageMaxSize),
@@ -210,98 +201,6 @@ class BeadStitcher {
     return out;
   }
 
-  // ---------- 一板多图（固定正方形底板） ----------
-
-  /// 将多张图排进一块 [boardSize] x [boardSize] 的正方形底板。
-  ///
-  /// 与 [stitch] 的区别：总尺寸固定等于底板尺寸（不随子图数量增长），
-  /// 子图缩小到各自区域内容纳（保持比例、居中、不放大超过需要），
-  /// 区域内剩余部分与未占用的格子都是**空格**（底板露出来）。
-  ///
-  /// 布局规则（n 张图）：
-  /// - 列数 = ceil(sqrt(n))，行数 = ceil(n / 列数)——尽量接近正方形分布
-  /// - 每个区域 = boardSize/列数 x boardSize/行数（整数除法，余数给末行/列）
-  /// - 子图按比例缩到区域内（最长边不超区域对应边，小图不放大）
-  /// - 空余格子为空格（null），透明底子图与底板自然融合
-  ///
-  /// [options] 中 perImageMaxSize/columns 被忽略（由底板尺寸决定）。
-  static StitchResult stitchOnBoard({
-    required List<(Uint8List, int, int)> images,
-    required int boardSize,
-    StitchOptions options = const StitchOptions(),
-  }) {
-    if (images.isEmpty) {
-      throw ArgumentError('至少需要一张图片');
-    }
-    final board = boardSize.clamp(10, 500);
-    final n = images.length;
-    final cols = (math.sqrt(n).ceil()).clamp(1, n);
-    final rows = (n + cols - 1) ~/ cols;
-
-    // 每个区域的尺寸（末行/末列吃余数，保证总尺寸恰为 board）。
-    final regionW = List<int>.filled(cols, board ~/ cols);
-    for (int i = 0; i < board % cols; i++) {
-      regionW[i] += 1;
-    }
-    final regionH = List<int>.filled(rows, board ~/ rows);
-    for (int i = 0; i < board % rows; i++) {
-      regionH[i] += 1;
-    }
-
-    // 区域 x/y 起点。
-    final regionX = <int>[0];
-    for (int i = 0; i < cols - 1; i++) {
-      regionX.add(regionX[i] + regionW[i]);
-    }
-    final regionY = <int>[0];
-    for (int i = 0; i < rows - 1; i++) {
-      regionY.add(regionY[i] + regionH[i]);
-    }
-
-    // 逐张转换：约束到所在区域（最长边不超区域对应边，不放大）。
-    final cells = List<BeadColor?>.filled(board * board, null);
-    final converted = <BeadPattern>[];
-    for (var i = 0; i < n; i++) {
-      final cx = i % cols;
-      final cy = i ~/ cols;
-      final (pixels, w, h) = images[i];
-      // 区域内容纳：分别以区域宽/高为最长边约束取更小者。
-      final (gw1, gh1) = fitSize(w, h, regionW[cx]);
-      final (gw2, gh2) = fitSize(w, h, regionH[cy]);
-      final gw = math.min(gw1, gw2).clamp(1, regionW[cx]);
-      final gh = math.min(gh1, gh2).clamp(1, regionH[cy]);
-      final pattern = BeadConverter.convert(
-        pixels: pixels,
-        srcWidth: w,
-        srcHeight: h,
-        options: ConvertOptions(
-          gridWidth: gw,
-          gridHeight: gh,
-          dither: options.dither,
-          brightness: options.brightness,
-          contrast: options.contrast,
-          colorLimit: options.colorLimit,
-        ),
-      );
-      converted.add(pattern);
-      // 居中放入区域。
-      final offX = regionX[cx] + (regionW[cx] - pattern.width) ~/ 2;
-      final offY = regionY[cy] + (regionH[cy] - pattern.height) ~/ 2;
-      for (int y = 0; y < pattern.height; y++) {
-        for (int x = 0; x < pattern.width; x++) {
-          cells[(y + offY) * board + x + offX] = pattern.cellAt(x, y);
-        }
-      }
-    }
-
-    return StitchResult(
-      pattern: _buildPattern(cells, board, board),
-      placements: [
-        for (var i = 0; i < n; i++) (i % cols, i ~/ cols, converted[i]),
-      ],
-    );
-  }
-
   /// 统计用量并生成图纸对象（与 BeadConverter._buildPattern 同规则）。
   static BeadPattern _buildPattern(List<BeadColor?> cells, int w, int h) {
     final counts = <BeadColor, int>{};
@@ -331,24 +230,11 @@ class BeadStitcher {
 /// 拼合结果装入编辑器时保留，用户改「图纸尺寸」确认后按新颗粒度
 /// 重新拼合（颗粒度可调，不用回对话框重来）。
 class StitchRecipe {
-  const StitchRecipe({
-    required this.images,
-    required this.options,
-    this.boardMode = false,
-    this.boardSize = 50,
-  });
+  const StitchRecipe({required this.images, required this.options});
 
   /// 来源图（RGBA 像素, 宽, 高）。
   final List<(Uint8List, int, int)> images;
 
   /// 首次拼合的参数（columns/dither 等沿用，perImageMaxSize 可变）。
   final StitchOptions options;
-
-  /// 是否为一板多图模式（stitchOnBoard 生成）。
-  /// true 时重新拼合走 stitchOnBoard（boardSize 固定，颗粒度由
-  /// 板内布局决定，改尺寸确认无意义）。
-  final bool boardMode;
-
-  /// 底板尺寸（boardMode 时有效）。
-  final int boardSize;
 }

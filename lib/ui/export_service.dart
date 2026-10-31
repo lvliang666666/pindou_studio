@@ -22,11 +22,7 @@ class ExportService {
   }
 
   /// 将图纸渲染为 PNG 字节（含行列号、网格线、底板分界线、色号与图例）。
-  /// [boardSize] 底板分界虚线间距（豆数），默认 29。
-  static Future<Uint8List> renderPatternPng(
-    BeadPattern pattern, {
-    int boardSize = 29,
-  }) async {
+  static Future<Uint8List> renderPatternPng(BeadPattern pattern) async {
     const cell = 32; // 每豆 32px
     const margin = 56; // 四周留白（含行列号区域）
     final legendRows = (pattern.counts.length + 7) ~/ 8; // 图例每行 8 项
@@ -126,8 +122,9 @@ class ExportService {
         ..color = Colors.black87,
     );
 
-    // 行列号（每 5 格标注）与底板分界虚线。
+    // 行列号（每 5 格标注）与 29 格底板分界虚线。
     const rulerStep = 5;
+    const boardSize = 29;
     final labelStyle = const TextStyle(
       color: Colors.black54,
       fontSize: 13,

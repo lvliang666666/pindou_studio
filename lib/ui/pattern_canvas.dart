@@ -16,9 +16,6 @@ class PatternCanvas extends StatefulWidget {
     required this.colors,
     this.showGrid = true,
     this.showRuler = true,
-    this.boardSize = 29,
-    this.showBoard = false,
-    this.partitionSize = 10,
     this.onCellTap,
     this.brushCode,
     this.onPaintCell,
@@ -37,15 +34,6 @@ class PatternCanvas extends StatefulWidget {
 
   /// 是否显示行号/列号标尺与底板分界线。
   final bool showRuler;
-
-  /// 底板尺寸（豆数）：分界虚线按此间距绘制。
-  final int boardSize;
-
-  /// 是否显示实体底板（白色底板铺在图纸下方，图纸小于底板时露出）。
-  final bool showBoard;
-
-  /// 底板分区尺寸（豆数）：每 N 颗豆一条分界线。
-  final int partitionSize;
 
   /// 点击格子回调（未启用画笔时），参数为格子坐标 (x, y)。
   final void Function(int x, int y)? onCellTap;
@@ -83,15 +71,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
   BeadPattern? _rasterPattern;
   bool _rasterShowGrid = true;
   bool _rasterShowRuler = true;
-  int _rasterBoardSize = 29;
-  bool _rasterShowBoard = false;
-  int _rasterPartitionSize = 10;
   PindouCanvasColors? _rasterColors;
-
-  /// 位图中图纸相对位图左上角的偏移（格子数）：底板显示时图纸居中，
-  /// 命中测试（_cellAt）与绘制都要用同一偏移换算。
-  int _rasterOffX = 0;
-  int _rasterOffY = 0;
 
   /// 正在光栅化（避免重复提交）。
   bool _rasterizing = false;
@@ -142,15 +122,12 @@ class _PatternCanvasState extends State<PatternCanvas> {
     final vpW = box.size.width - 32;
     final vpH = box.size.height - 32;
     if (vpW <= 0 || vpH <= 0) return;
-    // 底板显示时按底板区域适配（图纸居中其中）。
-    final w = widget.showBoard ? math.max(p.width, widget.boardSize) : p.width;
-    final h = widget.showBoard ? math.max(p.height, widget.boardSize) : p.height;
-    final cell = (vpW / w).clamp(1.0, vpH / h);
+    final cell = (vpW / p.width).clamp(1.0, vpH / p.height);
     final scale = cell / _baseCell;
     _transform.value = Matrix4.identity()
       ..translateByDouble(
-        (box.size.width - w * cell) / 2,
-        (box.size.height - h * cell) / 2,
+        (box.size.width - p.width * cell) / 2,
+        (box.size.height - p.height * cell) / 2,
         0,
         1,
       )
@@ -183,9 +160,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
         (p != _rasterPattern ||
             widget.showGrid != _rasterShowGrid ||
             widget.showRuler != _rasterShowRuler ||
-            widget.boardSize != _rasterBoardSize ||
-            widget.showBoard != _rasterShowBoard ||
-            widget.partitionSize != _rasterPartitionSize ||
             widget.colors != _rasterColors)) {
       _scheduleRasterizeAfterFrame();
     }
@@ -217,34 +191,17 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterPattern!.height == p.height &&
         _rasterShowGrid == widget.showGrid &&
         _rasterShowRuler == widget.showRuler &&
-        _rasterBoardSize == widget.boardSize &&
-        _rasterShowBoard == widget.showBoard &&
-        _rasterPartitionSize == widget.partitionSize &&
         _rasterColors == widget.colors;
     _pendingDirtyCells = null;
     try {
       // 2x 超采样：放大到 200% 仍清晰。
       const ss = 2.0;
-      // 底板显示时位图覆盖底板区域，图纸左上角对齐底板（无摆放偏移）。
-      final boardW = widget.showBoard ? math.max(p.width, widget.boardSize) : p.width;
-      final boardH = widget.showBoard ? math.max(p.height, widget.boardSize) : p.height;
-      const offX = 0;
-      const offY = 0;
-      final w = (boardW * _baseCell * ss).round();
-      final h = (boardH * _baseCell * ss).round();
+      final w = (p.width * _baseCell * ss).round();
+      final h = (p.height * _baseCell * ss).round();
       if (w <= 0 || h <= 0) return;
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
       canvas.scale(ss);
-      // 底板：白色实体（图纸区域外露出），带外边框。
-      if (widget.showBoard) {
-        canvas.drawRect(
-          Rect.fromLTWH(0, 0, boardW * _baseCell, boardH * _baseCell),
-          Paint()..color = widget.colors.boardSurface,
-        );
-      }
-      // 图纸区域平移到居中位置。
-      canvas.translate(offX * _baseCell, offY * _baseCell);
       if (canIncremental) {
         // 增量：旧位图打底，脏格子覆盖。
         // 注意 canvas 已 scale(ss)：所有坐标都是 1x 逻辑坐标，
@@ -355,11 +312,11 @@ class _PatternCanvasState extends State<PatternCanvas> {
                 Offset(entry.value.$2, y), isMajor ? thick : thin);
           }
         }
-        // 底板分界虚线：脏格子覆盖段同样需要补画（橙色虚线
+        // 29 格底板分界虚线：脏格子覆盖段同样需要补画（橙色虚线
         // 1.5px 居中于格线，色块 bleed 盖掉自己侧 0.75px 后必须补回；
         // 覆盖段同样精确限制在色块区域内，不伸入完好区域）。
         if (widget.showRuler) {
-          final boardSize = widget.boardSize;
+          const boardSize = 29;
           final dashPaint = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5
@@ -398,15 +355,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
           pattern: p,
           showGrid: widget.showGrid,
           showRuler: widget.showRuler,
-          boardSize: widget.boardSize,
           cell: _baseCell,
           colors: widget.colors,
-          showBoard: widget.showBoard,
-          boardW: boardW,
-          boardH: boardH,
-          partitionSize: widget.partitionSize,
-          patternOffsetX: offX,
-          patternOffsetY: offY,
         ).paint(canvas, Size(w.toDouble(), h.toDouble()));
       }
       final picture = recorder.endRecording();
@@ -421,12 +371,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
         _rasterPattern = p;
         _rasterShowGrid = widget.showGrid;
         _rasterShowRuler = widget.showRuler;
-        _rasterBoardSize = widget.boardSize;
-        _rasterShowBoard = widget.showBoard;
-        _rasterPartitionSize = widget.partitionSize;
         _rasterColors = widget.colors;
-        _rasterOffX = offX;
-        _rasterOffY = offY;
       });
       old?.dispose();
     } finally {
@@ -447,13 +392,12 @@ class _PatternCanvasState extends State<PatternCanvas> {
 
   /// 屏幕坐标 -> 格子坐标。
   /// 除法结果可能因浮点误差略小于整数（如 47.9999999），加 epsilon 修正。
-  /// 底板显示时图纸居中于底板，需减去位图偏移。
   (int, int)? _cellAt(Offset localPos) {
     final p = widget.pattern;
     if (p == null) return null;
     const eps = 1e-6;
-    final x = (localPos.dx / _baseCell + eps).floor() - _rasterOffX;
-    final y = (localPos.dy / _baseCell + eps).floor() - _rasterOffY;
+    final x = (localPos.dx / _baseCell + eps).floor();
+    final y = (localPos.dy / _baseCell + eps).floor();
     if (x < 0 || x >= p.width || y < 0 || y >= p.height) return null;
     return (x, y);
   }
@@ -616,9 +560,7 @@ class _PatternCanvasState extends State<PatternCanvas> {
           minScale: 0.2,
           maxScale: 8.0,
           constrained: false,
-          // 画笔模式下左键用于涂色（pan 由本组件接管）；非画笔时
-          // 左键拖动平移视图。滚轮/双指缩放不受影响。
-          panEnabled: !brushActive,
+          panEnabled: !brushActive, // 画笔模式下左键用于涂色，滚轮/双指仍可缩放。
           scaleEnabled: true,
           child: Listener(
             onPointerDown: (e) => _activeButtons = e.buttons,
@@ -633,8 +575,6 @@ class _PatternCanvasState extends State<PatternCanvas> {
                         final cell = _cellAt(details.localPosition);
                         if (cell != null) widget.onCellTap!(cell.$1, cell.$2);
                       }),
-            // pan 仅画笔模式注册（涂色/擦除）；非画笔时左键拖动
-            // 交还 InteractiveViewer 平移视图（panEnabled 同步恢复）。
             onPanStart: brushActive ? _handlePanStart : null,
             onPanUpdate: brushActive ? _handlePanUpdate : null,
             onPanEnd: brushActive ? _handlePanEnd : null,
@@ -642,14 +582,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
             // 不区分按键，_handlePanStart 按 _activeButtons 判定擦除模式），
             // 单击一格 = 一次零距离 pan，同样走 begin/erase/end。
               child: SizedBox(
-                width: (widget.showBoard
-                        ? math.max(pattern.width, widget.boardSize)
-                        : pattern.width) *
-                    _baseCell,
-                height: (widget.showBoard
-                        ? math.max(pattern.height, widget.boardSize)
-                        : pattern.height) *
-                    _baseCell,
+                width: pattern.width * _baseCell,
+                height: pattern.height * _baseCell,
                 // 内层 Listener：右键擦除走 raw pointer（pan 手势只响应
                 // 左键）。放在 SizedBox 内层保证 localPosition 与 _cellAt
                 // 同一坐标系。
@@ -679,19 +613,8 @@ class _PatternCanvasState extends State<PatternCanvas> {
                                 pattern: pattern,
                                 showGrid: widget.showGrid,
                                 showRuler: widget.showRuler,
-                                boardSize: widget.boardSize,
                                 cell: _baseCell,
                                 colors: widget.colors,
-                                showBoard: widget.showBoard,
-                                boardW: widget.showBoard
-                                    ? math.max(pattern.width, widget.boardSize)
-                                    : pattern.width,
-                                boardH: widget.showBoard
-                                    ? math.max(pattern.height, widget.boardSize)
-                                    : pattern.height,
-                                partitionSize: widget.partitionSize,
-                                patternOffsetX: 0,
-                                patternOffsetY: 0,
                               )
                             : null,
                         cell: _baseCell,
@@ -851,37 +774,15 @@ class _PatternPainter extends CustomPainter {
     required this.pattern,
     required this.showGrid,
     required this.showRuler,
-    required this.boardSize,
     required this.cell,
     required this.colors,
-    this.showBoard = false,
-    this.boardW,
-    this.boardH,
-    this.partitionSize = 10,
-    this.patternOffsetX = 0,
-    this.patternOffsetY = 0,
   });
 
   final BeadPattern pattern;
   final bool showGrid;
   final bool showRuler;
-  final int boardSize;
   final double cell;
   final PindouCanvasColors colors;
-
-  /// 底板显示：白色实体底板铺在图纸下方（图纸居中，四周露出）。
-  final bool showBoard;
-
-  /// 底板区域尺寸（格子数）：showBoard 时由调用方传入（max(图纸, 底板)）。
-  final int? boardW;
-  final int? boardH;
-
-  /// 底板分区尺寸（豆数）：每 N 颗豆一条分界线。
-  final int partitionSize;
-
-  /// 图纸在底板上的偏移（格子数）：showBoard 时由调用方传入。
-  final int patternOffsetX;
-  final int patternOffsetY;
 
   /// 标尺文字跨帧缓存：(文本, 格子尺寸) -> 已排版 TextPainter。
   /// 主题切换时清空（文字颜色变了，缓存的排版结果作废）。
@@ -890,101 +791,6 @@ class _PatternPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final fillPaint = Paint()..style = PaintingStyle.fill;
-
-    // 底板显示：先铺白色实体底板（含边缘描边），图纸按偏移摆放。
-    final bw = boardW ?? pattern.width;
-    final bh = boardH ?? pattern.height;
-    final offX = showBoard ? patternOffsetX : 0;
-    final offY = showBoard ? patternOffsetY : 0;
-    if (showBoard) {
-      // 白色实体底板。
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, bw * cell, bh * cell),
-        Paint()..color = colors.boardSurface,
-      );
-      // 底板格线（淡）：每格一条，与分区线区分。
-      final faintPath = Path();
-      for (int x = 1; x < bw; x++) {
-        faintPath.moveTo(x * cell, 0);
-        faintPath.lineTo(x * cell, bh * cell);
-      }
-      for (int y = 1; y < bh; y += 1) {
-        faintPath.moveTo(0, y * cell);
-        faintPath.lineTo(bw * cell, y * cell);
-      }
-      canvas.drawPath(
-        faintPath,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1
-          ..color = colors.boardGrid,
-      );
-      // 底板分区线（深）：每 partitionSize 豆一条，模拟实体底板分区。
-      final ps = partitionSize.clamp(1, math.max(bw, bh)).toInt();
-      final partPath = Path();
-      for (int x = ps; x < bw; x += ps) {
-        partPath.moveTo(x * cell, 0);
-        partPath.lineTo(x * cell, bh * cell);
-      }
-      for (int y = ps; y < bh; y += ps) {
-        partPath.moveTo(0, y * cell);
-        partPath.lineTo(bw * cell, y * cell);
-      }
-      canvas.drawPath(
-        partPath,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = colors.boardEdge,
-      );
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, bw * cell, bh * cell),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = colors.boardEdge,
-      );
-      // 分区坐标：沿底板顶部与左侧标注分区序号（1 起）。
-      if (showRuler && cell >= 10) {
-        final labelStyle = TextStyle(
-          color: colors.rulerText,
-          fontSize: cell * 0.42,
-          fontWeight: FontWeight.w600,
-        );
-        final rulerCache = _rulerTextCache;
-        void drawLabel(String text, Offset center) {
-          final key = (text, cell);
-          var tp = rulerCache[key];
-          if (tp == null) {
-            tp = TextPainter(textDirection: TextDirection.ltr)
-              ..text = TextSpan(text: text, style: labelStyle)
-              ..layout();
-            rulerCache[key] = tp;
-          }
-          tp.paint(
-            canvas,
-            Offset(
-              center.dx - tp.width / 2,
-              center.dy - tp.height / 2,
-            ),
-          );
-        }
-
-        final cols = (bw + ps - 1) ~/ ps;
-        final rows = (bh + ps - 1) ~/ ps;
-        for (int i = 0; i < cols; i++) {
-          // 分区中心 x 坐标（末列可能不满 ps）。
-          final cx = (i * ps + (math.min(ps, bw - i * ps)) / 2) * cell;
-          drawLabel('${i + 1}', Offset(cx, -cell * 0.7));
-        }
-        for (int i = 0; i < rows; i++) {
-          final cy = (i * ps + (math.min(ps, bh - i * ps)) / 2) * cell;
-          drawLabel('${i + 1}', Offset(-cell * 0.7, cy));
-        }
-      }
-      // 图纸区域平移到居中位置（后续所有绘制都在图纸坐标系内）。
-      canvas.translate(offX * cell, offY * cell);
-    }
 
     // 绘制全部格子。RepaintBoundary 将结果缓存为图层：
     // 内容不变时（缩放/平移）不再重绘，交互由合成器完成，因此这里
@@ -1076,10 +882,10 @@ class _PatternPainter extends CustomPainter {
         ..color = colors.patternBorder,
     );
 
-    // 行号/列号标尺（每 5 格标注）与底板分界线。
+    // 行号/列号标尺（每 5 格标注）与 29 格底板分界线。
     if (showRuler && cell >= 10) {
       const rulerStep = 5;
-      final boardSize = this.boardSize;
+      const boardSize = 29;
       final labelStyle = TextStyle(
         color: colors.rulerText,
         fontSize: cell * 0.42,
@@ -1140,15 +946,8 @@ class _PatternPainter extends CustomPainter {
     return oldDelegate.pattern != pattern ||
         oldDelegate.showGrid != showGrid ||
         oldDelegate.showRuler != showRuler ||
-        oldDelegate.boardSize != boardSize ||
         oldDelegate.cell != cell ||
-        oldDelegate.colors != colors ||
-        oldDelegate.showBoard != showBoard ||
-        oldDelegate.boardW != boardW ||
-        oldDelegate.boardH != boardH ||
-        oldDelegate.partitionSize != partitionSize ||
-        oldDelegate.patternOffsetX != patternOffsetX ||
-        oldDelegate.patternOffsetY != patternOffsetY;
+        oldDelegate.colors != colors;
   }
 }
 
