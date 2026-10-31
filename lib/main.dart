@@ -24,9 +24,11 @@ class _PindouStudioAppState extends State<PindouStudioApp> {
 
   /// 底板尺寸变化 → 同步默认图纸尺寸（空编辑器/新建项目跟随），
   /// 并同步到已存在的编辑器状态（底板显示/超出缩回立即生效）。
+  /// 色卡变化 → 同步编辑器状态（画笔失效/图纸重映射/重转换色）。
   void _onSettingsChanged() {
     EditorState.syncDefaultGridSize(_settings.boardSize);
     _editorState?.syncBoardSize(_settings.boardSize);
+    _editorState?.syncPalette(_settings.paletteId);
   }
 
   @override
@@ -37,6 +39,7 @@ class _PindouStudioAppState extends State<PindouStudioApp> {
     // 底板尺寸同步为默认图纸尺寸（空编辑器/新建项目用）。
     _settings.load().then((_) {
       EditorState.syncDefaultGridSize(_settings.boardSize);
+      _editorState?.syncPalette(_settings.paletteId);
     });
     // 底板尺寸变化时同步到编辑器状态（底板显示/超出缩回用）。
     _settings.addListener(_onSettingsChanged);

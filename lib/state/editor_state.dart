@@ -102,6 +102,25 @@ class EditorState extends ChangeNotifier {
     hasUnsavedChanges = true;
   }
 
+  /// 同步色卡（设置页切换后由应用根调用）。
+  ///
+  /// 与 [setPalette] 的区别：设置页已把全局色卡切好（BeadPalette.setActive
+  /// 已生效），这里只做编辑器侧的跟随——镜像 id、失效画笔、重转换色/
+  /// 重映射图纸。id 相同时幂等跳过（设置页其他字段变化也会触发本方法）。
+  void syncPalette(String id) {
+    if (paletteId == id && BeadPalette.active.id == id) return;
+    BeadPalette.setActive(id);
+    paletteId = BeadPalette.active.id;
+    brushCode = null;
+    if (_pixels != null) {
+      scheduleReconvert();
+    } else {
+      _remapPatternToActivePalette();
+      notifyListeners();
+    }
+    hasUnsavedChanges = true;
+  }
+
   /// 把当前 pattern 的色号重映射到当前色卡（项目加载/色卡切换用）。
   /// 空格（null）原样保留。
   void _remapPatternToActivePalette() {
